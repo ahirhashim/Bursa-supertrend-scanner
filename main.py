@@ -49,7 +49,7 @@ def test_do():
     if not ITICK_API_KEY:
         raise HTTPException(500, "ITICK_API_KEY belum diset dalam Render Environment.")
 
-    params = {"region": "MY", "codes": "7204", "kType": 8, "limit": 30}
+    params = {"region": "MY", "codes": "MAYBANK", "kType": 8, "limit": 30}
     try:
         r = requests.get(
             ITICK_URL,
@@ -67,13 +67,13 @@ def test_do():
         raise HTTPException(502, f"iTick error: {data.get('msg', data)}")
 
     raw = data.get("data", {})
-    candles = raw.get("7204", []) if isinstance(raw, dict) else []
+    candles = raw.get("MAYBANK", []) if isinstance(raw, dict) else []
     if isinstance(candles, dict):
         candles = candles.get("data", [])
 
     return {
         "ok": bool(candles),
-        "symbol": "D&O",
+        "symbol": "MAYBANK",
         "region": "MY",
         "timeframe": "1D",
         "count": len(candles) if isinstance(candles, list) else 0,
