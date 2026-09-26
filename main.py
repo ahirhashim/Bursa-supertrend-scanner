@@ -47,35 +47,61 @@ def health():
 @app.get("/api/test/do")
 def test_do():
     if not ITICK_API_KEY:
-        raise HTTPException(500, "ITICK_API_KEY belum diset dalam Render Environment.")
+        raise HTTPException(
+            500,
+            "ITICK_API_KEY belum diset dalam Render Environment."
+        )
 
-    params = {"region": "MY", "codes": "MAYBANK", "kType": 8, "limit": 30}
+    url = "https://api-free.itick.org/symbol/list"
+
+    params = {
+        "type": "stock",
+        "region": "MY",
+        "code": "D&O"
+    }
+
     try:
         r = requests.get(
-            ITICK_URL,
+            url,
             params=params,
-            headers={"accept": "application/json", "token": ITICK_API_KEY},
+            headers={
+                "accept": "application/json",
+                "token": ITICK_API_KEY
+            },
             timeout=20,
         )
         data = r.json()
+
     except requests.RequestException as e:
-        raise HTTPException(502, f"Gagal menghubungi iTick: {e}")
+        raise HTTPException(
+            502,
+            f"Gagal menghubungi iTick: {e}"
+        )
+
     except ValueError:
-        raise HTTPException(502, f"iTick memberi respons bukan JSON. HTTP {r.status_code}")
+        raise HTTPException(
+            502,
+            f"iTick memberi respons bukan JSON. HTTP {r.status_code}"
+        )
 
-    if r.status_code != 200 or data.get("code") != 0:
-        raise HTTPException(502, f"iTick error: {data.get('msg', data)}")
+    if r.status_code != 200:
+        raise HTTPException(
+            502,
+            f"iTick HTTP error: {data}"
+        )
 
-    raw = data.get("data", {})
-    candles = raw.get("MAYBANK", []) if isinstance(raw, dict) else []
-    if isinstance(candles, dict):
-        candles = candles.get("data", [])
+    if data.get("code") != 0:
+        raise HTTPException(
+            502,
+            f"iTick error: {data.get('msg', data)}"
+        )
+
+    results = data.get("data", [])
 
     return {
-        "ok": bool(candles),
-        "symbol": "MAYBANK",
+        "ok": True,
+        "search": "D&O",
         "region": "MY",
-        "timeframe": "1D",
-        "count": len(candles) if isinstance(candles, list) else 0,
-        "candles": candles if isinstance(candles, list) else [],
+        "results": results
     }
+    
