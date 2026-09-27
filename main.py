@@ -128,7 +128,7 @@ def test_do():
             500,
             "ITICK_API_KEY belum diset dalam Render Environment."
         )
-    params = {
+        params = {
         "region": "MY",
         "exchange": "MYX",
         "codes": "D&O",
@@ -136,9 +136,9 @@ def test_do():
         "limit": 100
     }
 
-    try:
+        try:
 
-        r = requests.get(
+            r = requests.get(
             ITICK_URL,
             params=params,
             headers={
@@ -148,7 +148,7 @@ def test_do():
             timeout=20
         )
 
-        data = r.json()
+            data = r.json()
 
     except requests.RequestException as e:
 
