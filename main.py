@@ -147,7 +147,7 @@ def test_do():
         timeout=20
     )
 
-    data = r.json()
+        data = r.json()
     except requests.RequestException as e:
 
         raise HTTPException(
