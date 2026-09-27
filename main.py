@@ -128,14 +128,14 @@ def test_do():
             500,
             "ITICK_API_KEY belum diset dalam Render Environment."
         )
+    params = {
+        "region": "MY",
+        "exchange": "MYX",
+        "codes": "D&O",
+        "kType": 8,
+        "limit": 100
+    }
 
-params = {
-    "region": "MY",
-    "exchange": "MYX",
-    "codes": "D&O",
-    "kType": 8,
-    "limit": 100
-}
     try:
 
         r = requests.get(
