@@ -136,20 +136,18 @@ def test_do():
         "limit": 100
     }
 
-        try:
+    try:
+        r = requests.get(
+        ITICK_URL,
+        params=params,
+        headers={
+            "accept": "application/json",
+            "token": ITICK_API_KEY
+        },
+        timeout=20
+    )
 
-            r = requests.get(
-            ITICK_URL,
-            params=params,
-            headers={
-                "accept": "application/json",
-                "token": ITICK_API_KEY
-            },
-            timeout=20
-        )
-
-            data = r.json()
-
+    data = r.json()
     except requests.RequestException as e:
 
         raise HTTPException(
@@ -165,6 +163,7 @@ def test_do():
         )
 
     if r.status_code != 200:
+ 
 
         raise HTTPException(
             502,
