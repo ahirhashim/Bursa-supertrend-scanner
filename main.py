@@ -128,7 +128,7 @@ def test_do():
             500,
             "ITICK_API_KEY belum diset dalam Render Environment."
         )
-        params = {
+    params = {
         "region": "MY",
         "exchange": "MYX",
         "codes": "D&O",
