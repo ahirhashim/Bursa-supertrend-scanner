@@ -28,6 +28,19 @@ SUPERTREND_FACTOR = 1.0
 
 
 # =========================================================
+# TEST UNIVERSE
+# =========================================================
+
+TEST_SYMBOLS = [
+    "D&O",
+    "SRIDGE",
+    "DNEX",
+    "ZETRIX",
+    "INARI"
+]
+
+
+# =========================================================
 # HOME PAGE
 # =========================================================
 
@@ -57,7 +70,7 @@ def home():
         }
 
         .card {
-            max-width: 560px;
+            max-width: 600px;
             margin: auto;
             background: #0d1b2d;
             padding: 20px;
@@ -82,6 +95,7 @@ def home():
             color: white;
             font-weight: bold;
             font-size: 15px;
+            margin-top: 8px;
         }
 
         pre {
@@ -106,11 +120,15 @@ def home():
             <h1>BURSA SUPERTREND SCANNER</h1>
 
             <p class="muted">
-                D&O Signal Test • Daily • ATR 10 / Factor 1.0
+                Universe Test • 5 Bursa counters • Daily • ATR 10 / Factor 1.0
             </p>
 
+            <button onclick="testUniverse()">
+                TEST 5 KAUNTER
+            </button>
+
             <button onclick="testDO()">
-                TEST D&O SIGNAL
+                TEST D&O SAHAJA
             </button>
 
             <pre id="out">Belum diuji.</pre>
@@ -120,13 +138,43 @@ def home():
 
         <script>
 
+        async function testUniverse() {
+
+            const out =
+                document.getElementById("out");
+
+            out.textContent =
+                "Sedang scan 5 kaunter...";
+
+
+            try {
+
+                const response =
+                    await fetch("/api/test/universe");
+
+                const data =
+                    await response.json();
+
+                out.textContent =
+                    JSON.stringify(data, null, 2);
+
+            } catch (error) {
+
+                out.textContent =
+                    "Ralat sambungan: " + error;
+
+            }
+
+        }
+
+
         async function testDO() {
 
             const out =
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang mengambil data D&O dan mengira signal...";
+                "Sedang menguji D&O...";
 
 
             try {
@@ -179,7 +227,6 @@ def true_range(high, low, previous_close):
     if previous_close is None:
 
         return high - low
-
 
     return max(
         high - low,
@@ -405,8 +452,6 @@ def calculate_supertrend(
         # -------------------------------------------------
         # DIRECTION
         #
-        # TradingView convention:
-        #
         # -1 = BULL
         #  1 = BEAR
         # -------------------------------------------------
@@ -471,7 +516,7 @@ def calculate_supertrend(
 
 
         # =================================================
-        # SIGNAL LOGIC
+        # SIGNAL
         # =================================================
 
         flip = False
@@ -480,13 +525,6 @@ def calculate_supertrend(
 
         # -------------------------------------------------
         # FLIP
-        #
-        # BEAR -> BULL
-        #
-        # Same logic as V6.9.2:
-        #
-        # previous direction > 0
-        # current direction < 0
         # -------------------------------------------------
 
         if (
@@ -500,9 +538,6 @@ def calculate_supertrend(
 
         # -------------------------------------------------
         # HIGH BREAK
-        #
-        # Current candle is BULL and
-        # current close > previous candle high
         # -------------------------------------------------
 
         if i > 0:
@@ -521,11 +556,11 @@ def calculate_supertrend(
 
 
         # -------------------------------------------------
-        # SIGNAL NUMBER
+        # SIGNAL
         #
         # 0 = NONE
-        # 1 = FLIP ONLY
-        # 2 = HIGH BREAK ONLY
+        # 1 = FLIP
+        # 2 = HIGH BREAK
         # 3 = FLIP + HIGH BREAK
         # -------------------------------------------------
 
@@ -551,7 +586,7 @@ def calculate_supertrend(
 
 
         # -------------------------------------------------
-        # SAVE RESULT
+        # SAVE
         # -------------------------------------------------
 
         result["basic_upper"] = basic_upper
@@ -572,7 +607,7 @@ def calculate_supertrend(
 
 
         # -------------------------------------------------
-        # UPDATE PREVIOUS VALUES
+        # UPDATE PREVIOUS
         # -------------------------------------------------
 
         previous_final_upper = final_upper
@@ -673,23 +708,10 @@ def format_result(candle):
 
 
 # =========================================================
-# TEST D&O
+# FETCH ONE SYMBOL
 # =========================================================
 
-@app.get("/api/test/do")
-def test_do():
-
-    # -----------------------------------------------------
-    # CHECK API KEY
-    # -----------------------------------------------------
-
-    if not ITICK_API_KEY:
-
-        raise HTTPException(
-            status_code=500,
-            detail="ITICK_API_KEY belum diset dalam Render Environment."
-        )
-
+def fetch_symbol_data(symbol):
 
     headers = {
         "accept": "application/json",
@@ -698,14 +720,16 @@ def test_do():
 
 
     # =====================================================
-    # STEP 1
-    # LOOKUP SYMBOL D&O
+    # SYMBOL LOOKUP
     # =====================================================
 
     symbol_params = {
+
         "type": "stock",
+
         "region": "MY",
-        "code": "D&O"
+
+        "code": symbol
     }
 
 
@@ -719,60 +743,49 @@ def test_do():
         )
 
 
-        print("")
-        print("==============================================")
-        print("iTick SYMBOL LOOKUP D&O")
-        print("URL:", symbol_response.url)
-        print(
-            "HTTP STATUS:",
-            symbol_response.status_code
+        symbol_data = (
+            symbol_response.json()
         )
-        print("RAW SYMBOL RESPONSE:")
-        print(symbol_response.text[:10000])
-        print("==============================================")
-
-
-        symbol_data = symbol_response.json()
 
 
     except requests.RequestException as error:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gagal menghubungi iTick symbol list: {error}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"Symbol lookup request error: {error}"
+        }
 
 
     except ValueError:
 
-        raise HTTPException(
-            status_code=502,
-            detail="iTick symbol list memberi respons bukan JSON."
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                "Symbol lookup bukan JSON."
+        }
 
-
-    # -----------------------------------------------------
-    # CHECK SYMBOL HTTP STATUS
-    # -----------------------------------------------------
 
     if symbol_response.status_code != 200:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"iTick symbol list HTTP error: {symbol_data}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"Symbol HTTP error: {symbol_response.status_code}"
+        }
 
-
-    # -----------------------------------------------------
-    # CHECK ITICK RESPONSE CODE
-    # -----------------------------------------------------
 
     if symbol_data.get("code") != 0:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"iTick symbol lookup error: {symbol_data}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"Symbol lookup error: {symbol_data}"
+        }
 
 
     symbol_list = symbol_data.get(
@@ -789,36 +802,15 @@ def test_do():
         symbol_list = []
 
 
-    # =====================================================
-    # SYMBOL NOT FOUND
-    # =====================================================
-
     if not symbol_list:
 
         return {
-
             "ok": False,
-
-            "stage": "symbol_lookup",
-
-            "message":
-                "iTick tidak memulangkan symbol untuk D&O.",
-
-            "requested_symbol": "D&O",
-
-            "region": "MY",
-
-            "symbol_lookup": [],
-
-            "count": 0,
-
-            "candles": []
+            "symbol": symbol,
+            "error":
+                "Symbol tidak dijumpai."
         }
 
-
-    # =====================================================
-    # GET SYMBOL INFORMATION
-    # =====================================================
 
     symbol_info = symbol_list[0]
 
@@ -828,56 +820,24 @@ def test_do():
     actual_exchange = symbol_info.get("e")
 
 
-    print(
-        "FOUND SYMBOL CODE:",
-        actual_code
-    )
-
-
-    print(
-        "FOUND SYMBOL NAME:",
-        actual_name
-    )
-
-
-    print(
-        "FOUND EXCHANGE:",
-        actual_exchange
-    )
-
-
-    # =====================================================
-    # CHECK SYMBOL CODE
-    # =====================================================
-
     if not actual_code:
 
         return {
-
             "ok": False,
-
-            "stage": "symbol_lookup",
-
-            "message":
-                "iTick pulangkan symbol tetapi tiada code.",
-
-            "symbol_lookup":
-                symbol_list,
-
-            "count": 0,
-
-            "candles": []
+            "symbol": symbol,
+            "error":
+                "Symbol tiada code."
         }
 
 
     # =====================================================
-    # STEP 2
-    # SINGLE STOCK K-LINE
+    # KLINE
     # =====================================================
 
     kline_params = {
 
-        "region": "MY",
+        "region":
+            "MY",
 
         "exchange":
             actual_exchange or "",
@@ -903,65 +863,50 @@ def test_do():
         )
 
 
-        print("")
-        print("==============================================")
-        print("iTick SINGLE KLINE D&O")
-        print("URL:", kline_response.url)
-        print(
-            "HTTP STATUS:",
-            kline_response.status_code
+        kline_data = (
+            kline_response.json()
         )
-        print("RAW KLINE RESPONSE:")
-        print(kline_response.text[:10000])
-        print("==============================================")
-
-
-        kline_data = kline_response.json()
 
 
     except requests.RequestException as error:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gagal menghubungi iTick K-line: {error}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"K-line request error: {error}"
+        }
 
 
     except ValueError:
 
-        raise HTTPException(
-            status_code=502,
-            detail="iTick K-line memberi respons bukan JSON."
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                "K-line bukan JSON."
+        }
 
-
-    # -----------------------------------------------------
-    # CHECK HTTP STATUS
-    # -----------------------------------------------------
 
     if kline_response.status_code != 200:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"iTick K-line HTTP error: {kline_data}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"K-line HTTP error: {kline_response.status_code}"
+        }
 
-
-    # -----------------------------------------------------
-    # CHECK ITICK RESPONSE CODE
-    # -----------------------------------------------------
 
     if kline_data.get("code") != 0:
 
-        raise HTTPException(
-            status_code=502,
-            detail=f"iTick K-line error: {kline_data}"
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                f"K-line error: {kline_data}"
+        }
 
-
-    # =====================================================
-    # GET CANDLES
-    # =====================================================
 
     raw = kline_data.get(
         "data",
@@ -978,16 +923,16 @@ def test_do():
         candles = []
 
 
-    print(
-        "KLINE DATA TYPE:",
-        type(raw).__name__
-    )
+    if not candles:
 
-
-    print(
-        "FINAL CANDLE COUNT:",
-        len(candles)
-    )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "name": actual_name,
+            "exchange": actual_exchange,
+            "error":
+                "Tiada daily candle."
+        }
 
 
     # =====================================================
@@ -1008,7 +953,7 @@ def test_do():
 
 
     # =====================================================
-    # CALCULATE SUPERTREND + SIGNAL
+    # CALCULATE
     # =====================================================
 
     calculated = calculate_supertrend(
@@ -1018,78 +963,26 @@ def test_do():
     )
 
 
-    # =====================================================
-    # LATEST 15
-    # =====================================================
+    if not calculated:
 
-    latest_15 = []
-
-
-    for candle in calculated[-15:]:
-
-        latest_15.append(
-            format_result(candle)
-        )
+        return {
+            "ok": False,
+            "symbol": symbol,
+            "error":
+                "Supertrend tidak dapat dikira."
+        }
 
 
-    # =====================================================
-    # FIND RECENT SIGNALS
-    # =====================================================
-
-    recent_signals = []
-
-
-    for candle in calculated:
-
-        if candle.get(
-            "signal",
-            0
-        ) != 0:
-
-            recent_signals.append(
-                format_result(candle)
-            )
-
-
-    # Keep only latest 10 signals
-
-    recent_signals = recent_signals[-10:]
+    latest = calculated[-1]
 
 
     # =====================================================
-    # LATEST
-    # =====================================================
-
-    latest = (
-        calculated[-1]
-        if calculated
-        else None
-    )
-
-
-    latest_result = None
-
-
-    if latest is not None:
-
-        latest_result = format_result(
-            latest
-        )
-
-
-    # =====================================================
-    # FINAL RESPONSE
+    # RETURN
     # =====================================================
 
     return {
 
-        "ok": bool(candles),
-
-        "stage":
-            "signal_complete",
-
-        "requested_symbol":
-            "D&O",
+        "ok": True,
 
         "symbol":
             actual_code,
@@ -1097,20 +990,61 @@ def test_do():
         "name":
             actual_name,
 
-        "region":
-            "MY",
-
         "exchange":
             actual_exchange,
 
+        "latest":
+            format_result(latest),
+
+        "recent_signals": [
+            format_result(c)
+            for c in calculated
+            if c.get("signal", 0) != 0
+        ][-5:]
+    }
+
+
+# =========================================================
+# TEST D&O
+# =========================================================
+
+@app.get("/api/test/do")
+def test_do():
+
+    if not ITICK_API_KEY:
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+                "ITICK_API_KEY belum diset dalam Render Environment."
+        )
+
+
+    result = fetch_symbol_data(
+        "D&O"
+    )
+
+
+    if not result.get("ok"):
+
+        raise HTTPException(
+            status_code=502,
+            detail=result
+        )
+
+
+    return {
+
+        "ok": True,
+
+        "stage":
+            "signal_complete",
+
+        "requested_symbol":
+            "D&O",
+
         "timeframe":
             "1D",
-
-        "requested":
-            50,
-
-        "count":
-            len(candles),
 
         "settings": {
 
@@ -1122,13 +1056,190 @@ def test_do():
 
         },
 
-        "latest":
-            latest_result,
+        "result":
+            result
+    }
 
-        "recent_signals":
-            recent_signals,
 
-        "latest_15":
-            latest_15
+# =========================================================
+# TEST 5 SYMBOL UNIVERSE
+# =========================================================
+
+@app.get("/api/test/universe")
+def test_universe():
+
+    if not ITICK_API_KEY:
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+                "ITICK_API_KEY belum diset dalam Render Environment."
+        )
+
+
+    results = []
+
+
+    for symbol in TEST_SYMBOLS:
+
+        print("")
+        print("==============================================")
+        print(
+            "SCANNING:",
+            symbol
+        )
+        print("==============================================")
+
+
+        result = fetch_symbol_data(
+            symbol
+        )
+
+
+        results.append(
+            result
+        )
+
+
+    # =====================================================
+    # BUILD SIMPLE SCANNER
+    # =====================================================
+
+    scanner = []
+
+
+    for result in results:
+
+        if not result.get("ok"):
+
+            scanner.append({
+
+                "symbol":
+                    result.get(
+                        "symbol"
+                    ),
+
+                "status":
+                    "ERROR",
+
+                "error":
+                    result.get(
+                        "error"
+                    )
+
+            })
+
+            continue
+
+
+        latest = result.get(
+            "latest",
+            {}
+        )
+
+
+        scanner.append({
+
+            "symbol":
+                result.get(
+                    "symbol"
+                ),
+
+            "name":
+                result.get(
+                    "name"
+                ),
+
+            "close":
+                latest.get(
+                    "close"
+                ),
+
+            "supertrend":
+                latest.get(
+                    "supertrend"
+                ),
+
+            "trend":
+                latest.get(
+                    "trend"
+                ),
+
+            "flip":
+                latest.get(
+                    "flip"
+                ),
+
+            "high_break":
+                latest.get(
+                    "high_break"
+                ),
+
+            "signal":
+                latest.get(
+                    "signal"
+                ),
+
+            "signal_name":
+                latest.get(
+                    "signal_name"
+                )
+
+        })
+
+
+    # =====================================================
+    # SIGNAL ONLY
+    # =====================================================
+
+    signal_results = [
+
+        item
+
+        for item in scanner
+
+        if item.get(
+            "signal",
+            0
+        ) != 0
+
+    ]
+
+
+    # =====================================================
+    # FINAL RESPONSE
+    # =====================================================
+
+    return {
+
+        "ok": True,
+
+        "stage":
+            "universe_complete",
+
+        "timeframe":
+            "1D",
+
+        "settings": {
+
+            "atr_length":
+                ATR_LENGTH,
+
+            "factor":
+                SUPERTREND_FACTOR
+
+        },
+
+        "requested_symbols":
+            TEST_SYMBOLS,
+
+        "count":
+            len(scanner),
+
+        "scanner":
+            scanner,
+
+        "signals_only":
+            signal_results
 
     }
