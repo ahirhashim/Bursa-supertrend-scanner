@@ -120,15 +120,15 @@ def home():
             <h1>BURSA SUPERTREND SCANNER</h1>
 
             <p class="muted">
-                Historical Signal Test • 5 Bursa counters • Daily • ATR 10 / Factor 1.0
+                iTick OHLC Verification • INARI • Daily
             </p>
+
+            <button onclick="checkINARIOHLC()">
+                CHECK INARI OHLC
+            </button>
 
             <button onclick="testHistory()">
                 TEST HISTORICAL SIGNAL
-            </button>
-
-            <button onclick="testUniverse()">
-                TEST 5 KAUNTER
             </button>
 
             <pre id="out">Belum diuji.</pre>
@@ -138,19 +138,19 @@ def home():
 
         <script>
 
-        async function testHistory() {
+        async function checkINARIOHLC() {
 
             const out =
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang mencari signal sejarah 5 kaunter...";
+                "Sedang mengambil OHLC INARI daripada iTick...";
 
 
             try {
 
                 const response =
-                    await fetch("/api/test/history");
+                    await fetch("/api/test/inari-ohlc");
 
                 const data =
                     await response.json();
@@ -168,19 +168,19 @@ def home():
         }
 
 
-        async function testUniverse() {
+        async function testHistory() {
 
             const out =
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang scan 5 kaunter...";
+                "Sedang mencari signal sejarah...";
 
 
             try {
 
                 const response =
-                    await fetch("/api/test/universe");
+                    await fetch("/api/test/history");
 
                 const data =
                     await response.json();
@@ -279,10 +279,6 @@ def calculate_atr(candles, length):
         return atr_values
 
 
-    # -----------------------------------------------------
-    # INITIAL RMA
-    # -----------------------------------------------------
-
     first_atr = (
         sum(tr_values[:length])
         / length
@@ -294,10 +290,6 @@ def calculate_atr(candles, length):
 
     previous_atr = first_atr
 
-
-    # -----------------------------------------------------
-    # WILDER RMA
-    # -----------------------------------------------------
 
     for i in range(length, len(tr_values)):
 
@@ -357,16 +349,8 @@ def calculate_supertrend(
         result["atr"] = atr
 
 
-        # -------------------------------------------------
-        # ATR BELUM CUKUP
-        # -------------------------------------------------
-
         if atr is None:
 
-            result["basic_upper"] = None
-            result["basic_lower"] = None
-            result["final_upper"] = None
-            result["final_lower"] = None
             result["supertrend"] = None
             result["direction"] = None
             result["trend"] = None
@@ -381,10 +365,6 @@ def calculate_supertrend(
 
             continue
 
-
-        # -------------------------------------------------
-        # BASIC BANDS
-        # -------------------------------------------------
 
         hl2 = (high + low) / 2.0
 
@@ -490,7 +470,7 @@ def calculate_supertrend(
 
 
         # -------------------------------------------------
-        # SUPERTREND VALUE
+        # SUPERTREND
         # -------------------------------------------------
 
         if direction < 0:
@@ -515,17 +495,11 @@ def calculate_supertrend(
             trend = "BEAR"
 
 
-        # =================================================
-        # SIGNAL
-        # =================================================
-
-        flip = False
-        high_break = False
-
-
         # -------------------------------------------------
         # FLIP
         # -------------------------------------------------
+
+        flip = False
 
         if (
             previous_direction is not None
@@ -539,6 +513,9 @@ def calculate_supertrend(
         # -------------------------------------------------
         # HIGH BREAK
         # -------------------------------------------------
+
+        high_break = False
+
 
         if i > 0:
 
@@ -557,11 +534,6 @@ def calculate_supertrend(
 
         # -------------------------------------------------
         # SIGNAL
-        #
-        # 0 = NONE
-        # 1 = FLIP
-        # 2 = HIGH BREAK
-        # 3 = FLIP + HIGH BREAK
         # -------------------------------------------------
 
         if flip and high_break:
@@ -593,6 +565,7 @@ def calculate_supertrend(
         result["basic_lower"] = basic_lower
         result["final_upper"] = final_upper
         result["final_lower"] = final_lower
+
         result["supertrend"] = supertrend
         result["direction"] = direction
         result["trend"] = trend
@@ -607,7 +580,7 @@ def calculate_supertrend(
 
 
         # -------------------------------------------------
-        # UPDATE PREVIOUS
+        # UPDATE
         # -------------------------------------------------
 
         previous_final_upper = final_upper
@@ -724,11 +697,8 @@ def fetch_symbol_data(symbol):
     # =====================================================
 
     symbol_params = {
-
         "type": "stock",
-
         "region": "MY",
-
         "code": symbol
     }
 
@@ -836,8 +806,7 @@ def fetch_symbol_data(symbol):
 
     kline_params = {
 
-        "region":
-            "MY",
+        "region": "MY",
 
         "exchange":
             actual_exchange or "",
@@ -1016,16 +985,20 @@ def fetch_symbol_data(symbol):
             format_result(latest),
 
         "historical_signals":
-            historical_signals
+            historical_signals,
+
+        # Simpan candle mentah untuk verification.
+        "raw_candles":
+            candles
     }
 
 
 # =========================================================
-# TEST D&O
+# INARI OHLC VERIFICATION
 # =========================================================
 
-@app.get("/api/test/do")
-def test_do():
+@app.get("/api/test/inari-ohlc")
+def test_inari_ohlc():
 
     if not ITICK_API_KEY:
 
@@ -1037,7 +1010,7 @@ def test_do():
 
 
     result = fetch_symbol_data(
-        "D&O"
+        "INARI"
     )
 
 
@@ -1049,220 +1022,91 @@ def test_do():
         )
 
 
-    return {
-
-        "ok": True,
-
-        "stage":
-            "signal_complete",
-
-        "requested_symbol":
-            "D&O",
-
-        "timeframe":
-            "1D",
-
-        "settings": {
-
-            "atr_length":
-                ATR_LENGTH,
-
-            "factor":
-                SUPERTREND_FACTOR
-
-        },
-
-        "result":
-            result
-    }
+    candles = result.get(
+        "raw_candles",
+        []
+    )
 
 
-# =========================================================
-# TEST 5 SYMBOL UNIVERSE
-# =========================================================
-
-@app.get("/api/test/universe")
-def test_universe():
-
-    if not ITICK_API_KEY:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "ITICK_API_KEY belum diset dalam Render Environment."
-        )
-
-
-    results = []
-
-
-    for symbol in TEST_SYMBOLS:
-
-        print("")
-        print("==============================================")
-        print(
-            "SCANNING:",
-            symbol
-        )
-        print("==============================================")
-
-
-        result = fetch_symbol_data(
-            symbol
-        )
-
-
-        results.append(
-            result
-        )
+    selected = []
 
 
     # =====================================================
-    # BUILD SIMPLE SCANNER
+    # AMBIL CANDLE SEKITAR 30 JULAI
     # =====================================================
 
-    scanner = []
+    for candle in candles:
+
+        date_string = format_timestamp(
+            candle.get("t")
+        )
 
 
-    for result in results:
+        if (
+            "2026-07-25"
+            <= date_string
+            <=
+            "2026-08-05"
+        ):
 
-        if not result.get("ok"):
+            selected.append({
 
-            scanner.append({
+                "date":
+                    date_string,
 
-                "symbol":
-                    result.get(
-                        "symbol"
-                    ),
+                "open":
+                    candle.get("o"),
 
-                "status":
-                    "ERROR",
+                "high":
+                    candle.get("h"),
 
-                "error":
-                    result.get(
-                        "error"
-                    )
+                "low":
+                    candle.get("l"),
+
+                "close":
+                    candle.get("c"),
+
+                "volume":
+                    candle.get("v"),
+
+                "timestamp":
+                    candle.get("t")
 
             })
 
-            continue
-
-
-        latest = result.get(
-            "latest",
-            {}
-        )
-
-
-        scanner.append({
-
-            "symbol":
-                result.get(
-                    "symbol"
-                ),
-
-            "name":
-                result.get(
-                    "name"
-                ),
-
-            "close":
-                latest.get(
-                    "close"
-                ),
-
-            "supertrend":
-                latest.get(
-                    "supertrend"
-                ),
-
-            "trend":
-                latest.get(
-                    "trend"
-                ),
-
-            "flip":
-                latest.get(
-                    "flip"
-                ),
-
-            "high_break":
-                latest.get(
-                    "high_break"
-                ),
-
-            "signal":
-                latest.get(
-                    "signal"
-                ),
-
-            "signal_name":
-                latest.get(
-                    "signal_name"
-                )
-
-        })
-
-
-    # =====================================================
-    # SIGNAL ONLY
-    # =====================================================
-
-    signal_results = [
-
-        item
-
-        for item in scanner
-
-        if item.get(
-            "signal",
-            0
-        ) != 0
-
-    ]
-
-
-    # =====================================================
-    # FINAL RESPONSE
-    # =====================================================
 
     return {
 
         "ok": True,
 
         "stage":
-            "universe_complete",
+            "inari_ohlc_verification",
+
+        "symbol":
+            "INARI",
+
+        "exchange":
+            result.get(
+                "exchange"
+            ),
 
         "timeframe":
             "1D",
 
-        "settings": {
-
-            "atr_length":
-                ATR_LENGTH,
-
-            "factor":
-                SUPERTREND_FACTOR
-
-        },
-
-        "requested_symbols":
-            TEST_SYMBOLS,
+        "range":
+            "2026-07-25 to 2026-08-05",
 
         "count":
-            len(scanner),
+            len(selected),
 
-        "scanner":
-            scanner,
-
-        "signals_only":
-            signal_results
+        "candles":
+            selected
 
     }
 
 
 # =========================================================
-# HISTORICAL SIGNAL TEST
+# TEST HISTORICAL SIGNAL
 # =========================================================
 
 @app.get("/api/test/history")
@@ -1281,15 +1125,6 @@ def test_history():
 
 
     for symbol in TEST_SYMBOLS:
-
-        print("")
-        print("==============================================")
-        print(
-            "HISTORICAL SIGNAL TEST:",
-            symbol
-        )
-        print("==============================================")
-
 
         result = fetch_symbol_data(
             symbol
@@ -1342,10 +1177,6 @@ def test_history():
 
         })
 
-
-    # =====================================================
-    # FINAL RESPONSE
-    # =====================================================
 
     return {
 
