@@ -1,5 +1,7 @@
 import os
+import json
 import requests
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -61,6 +63,7 @@ def home():
             padding:12px;
             border-radius:10px;
             margin-top:14px;
+            overflow-wrap:break-word;
         }
         </style>
     </head>
@@ -128,6 +131,7 @@ def test_do():
             500,
             "ITICK_API_KEY belum diset dalam Render Environment."
         )
+
     params = {
         "region": "MY",
         "exchange": "MYX",
@@ -137,18 +141,30 @@ def test_do():
     }
 
     try:
+
         r = requests.get(
-        ITICK_URL,
-        params=params,
-        headers={
-            "accept": "application/json",
-            "token": ITICK_API_KEY
-        },
-        timeout=20
-    )
+            ITICK_URL,
+            params=params,
+            headers={
+                "accept": "application/json",
+                "token": ITICK_API_KEY
+            },
+            timeout=20
+        )
+
+        print("==============================================")
+        print("iTick TEST D&O")
+        print("URL:", r.url)
+        print("HTTP STATUS:", r.status_code)
+        print("RAW RESPONSE:")
+        print(r.text[:10000])
+        print("==============================================")
 
         data = r.json()
+
     except requests.RequestException as e:
+
+        print("iTick REQUEST ERROR:", str(e))
 
         raise HTTPException(
             502,
@@ -157,13 +173,15 @@ def test_do():
 
     except ValueError:
 
+        print("iTick NON-JSON RESPONSE:")
+        print(r.text[:10000])
+
         raise HTTPException(
             502,
             f"iTick memberi respons bukan JSON. HTTP {r.status_code}"
         )
 
     if r.status_code != 200:
- 
 
         raise HTTPException(
             502,
@@ -177,13 +195,75 @@ def test_do():
             f"iTick error: {data.get('msg', data)}"
         )
 
-    raw = data.get("data", {})
+    raw = data.get("data")
+
+    print("iTick DATA TYPE:", type(raw).__name__)
 
     candles = []
 
+    raw_keys = []
+
     if isinstance(raw, dict):
 
-        candles = raw.get("D&O", [])
+        raw_keys = list(raw.keys())
+
+        print("iTick DATA KEYS:", raw_keys)
+
+        # ------------------------------------------
+        # Cuba key asal
+        # ------------------------------------------
+
+        possible_keys = [
+            "D&O",
+            "D&O@MYX",
+            "MYX:D&O",
+            "D&O.MYX",
+            "D&O:MYX"
+        ]
+
+        for key in possible_keys:
+
+            value = raw.get(key)
+
+            if isinstance(value, list):
+
+                candles = value
+
+                print("FOUND CANDLES USING KEY:", key)
+
+                break
+
+        # ------------------------------------------
+        # Jika hanya ada satu simbol dalam response,
+        # gunakan array tersebut.
+        # ------------------------------------------
+
+        if not candles:
+
+            list_values = [
+                value
+                for value in raw.values()
+                if isinstance(value, list)
+            ]
+
+            if len(list_values) == 1:
+
+                candles = list_values[0]
+
+                print(
+                    "FOUND CANDLES USING SINGLE-LIST FALLBACK"
+                )
+
+    elif isinstance(raw, list):
+
+        candles = raw
+
+        print(
+            "FOUND CANDLES: DATA ITICK IS DIRECT LIST"
+        )
+
+    print("FINAL CANDLE COUNT:", len(candles))
+    print("==============================================")
 
     return {
         "ok": bool(candles),
@@ -192,6 +272,8 @@ def test_do():
         "exchange": "MYX",
         "timeframe": "1D",
         "requested": 100,
-        "count": len(candles) if isinstance(candles, list) else 0,
-        "candles": candles if isinstance(candles, list) else []
+        "count": len(candles),
+        "raw_data_type": type(raw).__name__,
+        "raw_data_keys": raw_keys,
+        "candles": candles
     }
