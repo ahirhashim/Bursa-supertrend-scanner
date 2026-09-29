@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -600,14 +600,16 @@ def format_timestamp(timestamp):
 
     try:
 
-        dt = datetime.fromtimestamp(
-            float(timestamp) / 1000,
-            tz=timezone.utc
+        malaysia_tz = timezone(
+            timedelta(hours=8)
         )
 
+        dt = datetime.fromtimestamp(
+            float(timestamp) / 1000,
+            tz=malaysia_tz
+        )
 
         return dt.strftime("%Y-%m-%d")
-
 
     except Exception:
 
