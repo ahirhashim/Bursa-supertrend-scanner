@@ -9,7 +9,7 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 
 
 # =========================================================
-# iTick SETTINGS
+# ITICK SETTINGS
 # =========================================================
 
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
@@ -24,7 +24,6 @@ ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-
     return """
     <!doctype html>
 
@@ -39,49 +38,49 @@ def home():
 
         <style>
 
-        body{
-            font-family:Arial;
-            background:#07111f;
-            color:#eef5ff;
-            margin:0;
-            padding:20px
+        body {
+            font-family: Arial;
+            background: #07111f;
+            color: #eef5ff;
+            margin: 0;
+            padding: 20px;
         }
 
-        .card{
-            max-width:560px;
-            margin:auto;
-            background:#0d1b2d;
-            padding:20px;
-            border-radius:18px
+        .card {
+            max-width: 560px;
+            margin: auto;
+            background: #0d1b2d;
+            padding: 20px;
+            border-radius: 18px;
         }
 
-        h1{
-            font-size:22px
+        h1 {
+            font-size: 22px;
         }
 
-        .muted{
-            color:#9db0c8;
-            font-size:13px
+        .muted {
+            color: #9db0c8;
+            font-size: 13px;
         }
 
-        button{
-            width:100%;
-            padding:13px;
-            border:0;
-            border-radius:10px;
-            background:#247cff;
-            color:white;
-            font-weight:bold;
-            font-size:15px
+        button {
+            width: 100%;
+            padding: 13px;
+            border: 0;
+            border-radius: 10px;
+            background: #247cff;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
         }
 
-        pre{
-            white-space:pre-wrap;
-            background:#071524;
-            padding:12px;
-            border-radius:10px;
-            margin-top:14px;
-            overflow-wrap:break-word;
+        pre {
+            white-space: pre-wrap;
+            background: #071524;
+            padding: 12px;
+            border-radius: 10px;
+            margin-top: 14px;
+            overflow-wrap: break-word;
         }
 
         </style>
@@ -103,41 +102,37 @@ def home():
                 TEST D&O SEKARANG
             </button>
 
-            <pre id="out">
-Belum diuji.
-            </pre>
+            <pre id="out">Belum diuji.</pre>
 
         </div>
 
 
         <script>
 
-        async function testDO(){
+        async function testDO() {
 
-            const out = document.getElementById('out');
+            const out =
+                document.getElementById("out");
 
             out.textContent =
-                'Sedang menghubungi iTick...';
+                "Sedang menghubungi iTick...";
 
 
-            try{
+            try {
 
-                const r =
-                    await fetch('/api/test/do');
+                const response =
+                    await fetch("/api/test/do");
 
-
-                const d =
-                    await r.json();
-
+                const data =
+                    await response.json();
 
                 out.textContent =
-                    JSON.stringify(d,null,2);
+                    JSON.stringify(data, null, 2);
 
-
-            }catch(e){
+            } catch (error) {
 
                 out.textContent =
-                    'Ralat sambungan: ' + e;
+                    "Ralat sambungan: " + error;
 
             }
 
@@ -152,19 +147,15 @@ Belum diuji.
 
 
 # =========================================================
-# HEALTH CHECK
+# HEALTH
 # =========================================================
 
 @app.get("/api/health")
 def health():
 
     return {
-
         "ok": True,
-
-        "service":
-            "bursa-supertrend-scanner"
-
+        "service": "bursa-supertrend-scanner"
     }
 
 
@@ -182,22 +173,14 @@ def test_do():
     if not ITICK_API_KEY:
 
         raise HTTPException(
-
-            500,
-
-            "ITICK_API_KEY belum diset dalam Render Environment."
-
+            status_code=500,
+            detail="ITICK_API_KEY belum diset dalam Render Environment."
         )
 
 
     headers = {
-
-        "accept":
-            "application/json",
-
-        "token":
-            ITICK_API_KEY
-
+        "accept": "application/json",
+        "token": ITICK_API_KEY
     }
 
 
@@ -207,31 +190,19 @@ def test_do():
     # =====================================================
 
     symbol_params = {
-
-        "type":
-            "stock",
-
-        "region":
-            "MY",
-
-        "code":
-            "D&O"
-
+        "type": "stock",
+        "region": "MY",
+        "code": "D&O"
     }
 
 
     try:
 
         symbol_response = requests.get(
-
             ITICK_SYMBOL_URL,
-
             params=symbol_params,
-
             headers=headers,
-
             timeout=20
-
         )
 
 
@@ -243,73 +214,55 @@ def test_do():
             "HTTP STATUS:",
             symbol_response.status_code
         )
-
         print("RAW SYMBOL RESPONSE:")
-        print(
-            symbol_response.text[:10000]
-        )
-
+        print(symbol_response.text[:10000])
         print("==============================================")
 
 
-        symbol_data =
-            symbol_response.json()
+        symbol_data = symbol_response.json()
 
 
-    except requests.RequestException as e:
+    except requests.RequestException as error:
 
         raise HTTPException(
-
-            502,
-
-            f"Gagal menghubungi iTick symbol list: {e}"
-
+            status_code=502,
+            detail=f"Gagal menghubungi iTick symbol list: {error}"
         )
 
 
     except ValueError:
 
         raise HTTPException(
-
-            502,
-
-            "iTick symbol list memberi respons bukan JSON."
-
+            status_code=502,
+            detail="iTick symbol list memberi respons bukan JSON."
         )
 
 
     # -----------------------------------------------------
-    # CHECK SYMBOL HTTP
+    # CHECK SYMBOL HTTP STATUS
     # -----------------------------------------------------
 
     if symbol_response.status_code != 200:
 
         raise HTTPException(
-
-            502,
-
-            f"iTick symbol list HTTP error: {symbol_data}"
-
+            status_code=502,
+            detail=f"iTick symbol list HTTP error: {symbol_data}"
         )
 
 
     # -----------------------------------------------------
-    # CHECK SYMBOL API
+    # CHECK ITICK RESPONSE CODE
     # -----------------------------------------------------
 
     if symbol_data.get("code") != 0:
 
         raise HTTPException(
-
-            502,
-
-            f"iTick symbol lookup error: {symbol_data}"
-
+            status_code=502,
+            detail=f"iTick symbol lookup error: {symbol_data}"
         )
 
 
-    symbol_list =
-        symbol_data.get("data", [])
+    symbol_list = symbol_data.get("data", [])
 
 
     if not isinstance(symbol_list, list):
@@ -324,52 +277,26 @@ def test_do():
     if not symbol_list:
 
         return {
-
-            "ok":
-                False,
-
-            "stage":
-                "symbol_lookup",
-
-            "message":
-                "iTick tidak memulangkan symbol untuk D&O.",
-
-            "requested_symbol":
-                "D&O",
-
-            "region":
-                "MY",
-
-            "symbol_lookup":
-                [],
-
-            "count":
-                0,
-
-            "candles":
-                []
-
+            "ok": False,
+            "stage": "symbol_lookup",
+            "message": "iTick tidak memulangkan symbol untuk D&O.",
+            "requested_symbol": "D&O",
+            "region": "MY",
+            "symbol_lookup": [],
+            "count": 0,
+            "candles": []
         }
 
 
     # =====================================================
-    # GET ACTUAL SYMBOL INFORMATION
+    # GET SYMBOL INFORMATION
     # =====================================================
 
-    symbol_info =
-        symbol_list[0]
+    symbol_info = symbol_list[0]
 
-
-    actual_code =
-        symbol_info.get("c")
-
-
-    actual_name =
-        symbol_info.get("n")
-
-
-    actual_exchange =
-        symbol_info.get("e")
+    actual_code = symbol_info.get("c")
+    actual_name = symbol_info.get("n")
+    actual_exchange = symbol_info.get("e")
 
 
     print(
@@ -395,25 +322,12 @@ def test_do():
     if not actual_code:
 
         return {
-
-            "ok":
-                False,
-
-            "stage":
-                "symbol_lookup",
-
-            "message":
-                "iTick pulangkan symbol tetapi tiada code.",
-
-            "symbol_lookup":
-                symbol_list,
-
-            "count":
-                0,
-
-            "candles":
-                []
-
+            "ok": False,
+            "stage": "symbol_lookup",
+            "message": "iTick pulangkan symbol tetapi tiada code.",
+            "symbol_lookup": symbol_list,
+            "count": 0,
+            "candles": []
         }
 
 
@@ -423,37 +337,21 @@ def test_do():
     # =====================================================
 
     kline_params = {
-
-        "region":
-            "MY",
-
-        "exchange":
-            actual_exchange or "",
-
-        "code":
-            actual_code,
-
-        "kType":
-            8,
-
-        "limit":
-            10
-
+        "region": "MY",
+        "exchange": actual_exchange or "",
+        "code": actual_code,
+        "kType": 8,
+        "limit": 10
     }
 
 
     try:
 
         kline_response = requests.get(
-
             ITICK_KLINE_URL,
-
             params=kline_params,
-
             headers=headers,
-
             timeout=20
-
         )
 
 
@@ -461,74 +359,55 @@ def test_do():
         print("==============================================")
         print("iTick SINGLE KLINE D&O")
         print("URL:", kline_response.url)
-
         print(
             "HTTP STATUS:",
             kline_response.status_code
         )
-
         print("RAW KLINE RESPONSE:")
-
-        print(
-            kline_response.text[:10000]
-        )
-
+        print(kline_response.text[:10000])
         print("==============================================")
 
 
-        kline_data =
-            kline_response.json()
+        kline_data = kline_response.json()
 
 
-    except requests.RequestException as e:
+    except requests.RequestException as error:
 
         raise HTTPException(
-
-            502,
-
-            f"Gagal menghubungi iTick K-line: {e}"
-
+            status_code=502,
+            detail=f"Gagal menghubungi iTick K-line: {error}"
         )
 
 
     except ValueError:
 
         raise HTTPException(
-
-            502,
-
-            "iTick K-line memberi respons bukan JSON."
-
+            status_code=502,
+            detail="iTick K-line memberi respons bukan JSON."
         )
 
 
-    # =====================================================
-    # CHECK HTTP
-    # =====================================================
+    # -----------------------------------------------------
+    # CHECK HTTP STATUS
+    # -----------------------------------------------------
 
     if kline_response.status_code != 200:
 
         raise HTTPException(
-
-            502,
-
-            f"iTick K-line HTTP error: {kline_data}"
-
+            status_code=502,
+            detail=f"iTick K-line HTTP error: {kline_data}"
         )
 
 
-    # =====================================================
-    # CHECK iTick CODE
-    # =====================================================
+    # -----------------------------------------------------
+    # CHECK ITICK RESPONSE CODE
+    # -----------------------------------------------------
 
     if kline_data.get("code") != 0:
 
         raise HTTPException(
-
-            502,
-
-            f"iTick K-line error: {kline_data}"
-
+            status_code=502,
+            detail=f"iTick K-line error: {kline_data}"
         )
 
 
@@ -536,23 +415,22 @@ def test_do():
     # GET CANDLES
     # =====================================================
 
-    raw =
-        kline_data.get("data", [])
-
-
-    candles = []
+    raw = kline_data.get("data", [])
 
 
     if isinstance(raw, list):
 
         candles = raw
 
+    else:
+
+        candles = []
+
 
     print(
         "KLINE DATA TYPE:",
         type(raw).__name__
     )
-
 
     print(
         "FINAL CANDLE COUNT:",
@@ -565,41 +443,16 @@ def test_do():
     # =====================================================
 
     return {
-
-        "ok":
-            bool(candles),
-
-        "stage":
-            "complete",
-
-        "requested_symbol":
-            "D&O",
-
-        "symbol":
-            actual_code,
-
-        "name":
-            actual_name,
-
-        "region":
-            "MY",
-
-        "exchange":
-            actual_exchange,
-
-        "timeframe":
-            "1D",
-
-        "requested":
-            10,
-
-        "symbol_lookup":
-            symbol_list,
-
-        "count":
-            len(candles),
-
-        "candles":
-            candles
-
+        "ok": bool(candles),
+        "stage": "complete",
+        "requested_symbol": "D&O",
+        "symbol": actual_code,
+        "name": actual_name,
+        "region": "MY",
+        "exchange": actual_exchange,
+        "timeframe": "1D",
+        "requested": 10,
+        "symbol_lookup": symbol_list,
+        "count": len(candles),
+        "candles": candles
     }
