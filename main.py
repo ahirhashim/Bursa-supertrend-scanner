@@ -1,5 +1,4 @@
 import os
-import json
 import requests
 
 from fastapi import FastAPI, HTTPException
@@ -8,7 +7,9 @@ from fastapi.responses import HTMLResponse
 app = FastAPI(title="Bursa Supertrend Scanner")
 
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
-ITICK_URL = "https://api-free.itick.org/stock/klines"
+
+ITICK_SYMBOL_URL = "https://api-free.itick.org/symbol/list"
+ITICK_KLINES_URL = "https://api-free.itick.org/stock/klines"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -69,6 +70,7 @@ def home():
     </head>
 
     <body>
+
         <div class="card">
 
             <h1>BURSA SUPERTREND SCANNER</h1>
@@ -132,112 +134,189 @@ def test_do():
             "ITICK_API_KEY belum diset dalam Render Environment."
         )
 
-    params = {
+    headers = {
+        "accept": "application/json",
+        "token": ITICK_API_KEY
+    }
+
+    # ==================================================
+    # STEP 1
+    # TANYA iTick: APAKAH SYMBOL D&O YANG SEBENAR?
+    # ==================================================
+
+    symbol_params = {
+        "type": "stock",
         "region": "MY",
-        "exchange": "MYX",
-        "codes": "D&O",
+        "code": "D&O"
+    }
+
+    try:
+
+        symbol_response = requests.get(
+            ITICK_SYMBOL_URL,
+            params=symbol_params,
+            headers=headers,
+            timeout=20
+        )
+
+        print("")
+        print("==============================================")
+        print("iTick SYMBOL LOOKUP D&O")
+        print("URL:", symbol_response.url)
+        print("HTTP STATUS:", symbol_response.status_code)
+        print("RAW SYMBOL RESPONSE:")
+        print(symbol_response.text[:10000])
+        print("==============================================")
+
+        symbol_data = symbol_response.json()
+
+    except requests.RequestException as e:
+
+        raise HTTPException(
+            502,
+            f"Gagal menghubungi iTick symbol list: {e}"
+        )
+
+    except ValueError:
+
+        raise HTTPException(
+            502,
+            "iTick symbol list memberi respons bukan JSON."
+        )
+
+    if symbol_response.status_code != 200:
+
+        raise HTTPException(
+            502,
+            f"iTick symbol list HTTP error: {symbol_data}"
+        )
+
+    if symbol_data.get("code") != 0:
+
+        raise HTTPException(
+            502,
+            f"iTick symbol lookup error: {symbol_data}"
+        )
+
+    symbol_list = symbol_data.get("data", [])
+
+    if not isinstance(symbol_list, list):
+
+        symbol_list = []
+
+    # ==================================================
+    # Jika D&O tidak dijumpai
+    # ==================================================
+
+    if not symbol_list:
+
+        return {
+            "ok": False,
+            "stage": "symbol_lookup",
+            "message": "iTick tidak memulangkan symbol untuk D&O.",
+            "requested_symbol": "D&O",
+            "region": "MY",
+            "symbol_lookup": [],
+            "count": 0,
+            "candles": []
+        }
+
+    # ==================================================
+    # Ambil rekod pertama yang dijumpai
+    # ==================================================
+
+    symbol_info = symbol_list[0]
+
+    actual_code = symbol_info.get("c")
+    actual_exchange = symbol_info.get("e")
+    actual_name = symbol_info.get("n")
+
+    print("FOUND SYMBOL CODE:", actual_code)
+    print("FOUND SYMBOL NAME:", actual_name)
+    print("FOUND EXCHANGE:", actual_exchange)
+
+    if not actual_code:
+
+        return {
+            "ok": False,
+            "stage": "symbol_lookup",
+            "message": "iTick pulangkan rekod tetapi tiada symbol code.",
+            "symbol_lookup": symbol_list,
+            "count": 0,
+            "candles": []
+        }
+
+    # ==================================================
+    # STEP 2
+    # GUNA CODE + EXCHANGE YANG iTick SENDIRI PULANGKAN
+    # ==================================================
+
+    kline_params = {
+        "region": "MY",
+        "exchange": actual_exchange or "",
+        "codes": actual_code,
         "kType": 8,
         "limit": 100
     }
 
     try:
 
-        r = requests.get(
-            ITICK_URL,
-            params=params,
-            headers={
-                "accept": "application/json",
-                "token": ITICK_API_KEY
-            },
+        kline_response = requests.get(
+            ITICK_KLINES_URL,
+            params=kline_params,
+            headers=headers,
             timeout=20
         )
 
+        print("")
         print("==============================================")
-        print("iTick TEST D&O")
-        print("URL:", r.url)
-        print("HTTP STATUS:", r.status_code)
-        print("RAW RESPONSE:")
-        print(r.text[:10000])
+        print("iTick KLINES D&O")
+        print("URL:", kline_response.url)
+        print("HTTP STATUS:", kline_response.status_code)
+        print("RAW KLINE RESPONSE:")
+        print(kline_response.text[:10000])
         print("==============================================")
 
-        data = r.json()
+        kline_data = kline_response.json()
 
     except requests.RequestException as e:
 
-        print("iTick REQUEST ERROR:", str(e))
-
         raise HTTPException(
             502,
-            f"Gagal menghubungi iTick: {e}"
+            f"Gagal menghubungi iTick K-lines: {e}"
         )
 
     except ValueError:
 
-        print("iTick NON-JSON RESPONSE:")
-        print(r.text[:10000])
+        raise HTTPException(
+            502,
+            "iTick K-lines memberi respons bukan JSON."
+        )
+
+    if kline_response.status_code != 200:
 
         raise HTTPException(
             502,
-            f"iTick memberi respons bukan JSON. HTTP {r.status_code}"
+            f"iTick K-lines HTTP error: {kline_data}"
         )
 
-    if r.status_code != 200:
+    if kline_data.get("code") != 0:
 
         raise HTTPException(
             502,
-            f"iTick HTTP error: {data}"
+            f"iTick K-lines error: {kline_data}"
         )
 
-    if data.get("code") != 0:
-
-        raise HTTPException(
-            502,
-            f"iTick error: {data.get('msg', data)}"
-        )
-
-    raw = data.get("data")
-
-    print("iTick DATA TYPE:", type(raw).__name__)
+    raw = kline_data.get("data", {})
 
     candles = []
 
-    raw_keys = []
-
     if isinstance(raw, dict):
 
-        raw_keys = list(raw.keys())
+        # Biasanya key ialah symbol code sebenar.
+        candles = raw.get(actual_code, [])
 
-        print("iTick DATA KEYS:", raw_keys)
-
-        # ------------------------------------------
-        # Cuba key asal
-        # ------------------------------------------
-
-        possible_keys = [
-            "D&O",
-            "D&O@MYX",
-            "MYX:D&O",
-            "D&O.MYX",
-            "D&O:MYX"
-        ]
-
-        for key in possible_keys:
-
-            value = raw.get(key)
-
-            if isinstance(value, list):
-
-                candles = value
-
-                print("FOUND CANDLES USING KEY:", key)
-
-                break
-
-        # ------------------------------------------
-        # Jika hanya ada satu simbol dalam response,
-        # gunakan array tersebut.
-        # ------------------------------------------
-
+        # Fallback jika key response berbeza.
         if not candles:
 
             list_values = [
@@ -247,33 +326,36 @@ def test_do():
             ]
 
             if len(list_values) == 1:
-
                 candles = list_values[0]
-
-                print(
-                    "FOUND CANDLES USING SINGLE-LIST FALLBACK"
-                )
 
     elif isinstance(raw, list):
 
         candles = raw
 
-        print(
-            "FOUND CANDLES: DATA ITICK IS DIRECT LIST"
-        )
-
     print("FINAL CANDLE COUNT:", len(candles))
-    print("==============================================")
 
     return {
         "ok": bool(candles),
-        "symbol": "D&O",
+
+        "stage": "complete",
+
+        "requested_symbol": "D&O",
+
+        "symbol": actual_code,
+
+        "name": actual_name,
+
         "region": "MY",
-        "exchange": "MYX",
+
+        "exchange": actual_exchange,
+
         "timeframe": "1D",
+
         "requested": 100,
+
+        "symbol_lookup": symbol_list,
+
         "count": len(candles),
-        "raw_data_type": type(raw).__name__,
-        "raw_data_keys": raw_keys,
+
         "candles": candles
     }
