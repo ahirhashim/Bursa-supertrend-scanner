@@ -120,15 +120,15 @@ def home():
             <h1>BURSA SUPERTREND SCANNER</h1>
 
             <p class="muted">
-                Universe Test • 5 Bursa counters • Daily • ATR 10 / Factor 1.0
+                Historical Signal Test • 5 Bursa counters • Daily • ATR 10 / Factor 1.0
             </p>
+
+            <button onclick="testHistory()">
+                TEST HISTORICAL SIGNAL
+            </button>
 
             <button onclick="testUniverse()">
                 TEST 5 KAUNTER
-            </button>
-
-            <button onclick="testDO()">
-                TEST D&O SAHAJA
             </button>
 
             <pre id="out">Belum diuji.</pre>
@@ -138,19 +138,19 @@ def home():
 
         <script>
 
-        async function testUniverse() {
+        async function testHistory() {
 
             const out =
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang scan 5 kaunter...";
+                "Sedang mencari signal sejarah 5 kaunter...";
 
 
             try {
 
                 const response =
-                    await fetch("/api/test/universe");
+                    await fetch("/api/test/history");
 
                 const data =
                     await response.json();
@@ -168,19 +168,19 @@ def home():
         }
 
 
-        async function testDO() {
+        async function testUniverse() {
 
             const out =
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang menguji D&O...";
+                "Sedang scan 5 kaunter...";
 
 
             try {
 
                 const response =
-                    await fetch("/api/test/do");
+                    await fetch("/api/test/universe");
 
                 const data =
                     await response.json();
@@ -977,6 +977,25 @@ def fetch_symbol_data(symbol):
 
 
     # =====================================================
+    # HISTORICAL SIGNALS
+    # =====================================================
+
+    historical_signals = []
+
+
+    for candle in calculated:
+
+        if candle.get(
+            "signal",
+            0
+        ) != 0:
+
+            historical_signals.append(
+                format_result(candle)
+            )
+
+
+    # =====================================================
     # RETURN
     # =====================================================
 
@@ -996,11 +1015,8 @@ def fetch_symbol_data(symbol):
         "latest":
             format_result(latest),
 
-        "recent_signals": [
-            format_result(c)
-            for c in calculated
-            if c.get("signal", 0) != 0
-        ][-5:]
+        "historical_signals":
+            historical_signals
     }
 
 
@@ -1241,5 +1257,123 @@ def test_universe():
 
         "signals_only":
             signal_results
+
+    }
+
+
+# =========================================================
+# HISTORICAL SIGNAL TEST
+# =========================================================
+
+@app.get("/api/test/history")
+def test_history():
+
+    if not ITICK_API_KEY:
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+                "ITICK_API_KEY belum diset dalam Render Environment."
+        )
+
+
+    results = []
+
+
+    for symbol in TEST_SYMBOLS:
+
+        print("")
+        print("==============================================")
+        print(
+            "HISTORICAL SIGNAL TEST:",
+            symbol
+        )
+        print("==============================================")
+
+
+        result = fetch_symbol_data(
+            symbol
+        )
+
+
+        if not result.get("ok"):
+
+            results.append({
+
+                "symbol":
+                    symbol,
+
+                "status":
+                    "ERROR",
+
+                "error":
+                    result.get(
+                        "error"
+                    )
+
+            })
+
+            continue
+
+
+        historical = result.get(
+            "historical_signals",
+            []
+        )
+
+
+        results.append({
+
+            "symbol":
+                result.get(
+                    "symbol"
+                ),
+
+            "name":
+                result.get(
+                    "name"
+                ),
+
+            "signal_count":
+                len(historical),
+
+            "signals":
+                historical
+
+        })
+
+
+    # =====================================================
+    # FINAL RESPONSE
+    # =====================================================
+
+    return {
+
+        "ok": True,
+
+        "stage":
+            "historical_test_complete",
+
+        "timeframe":
+            "1D",
+
+        "settings": {
+
+            "atr_length":
+                ATR_LENGTH,
+
+            "factor":
+                SUPERTREND_FACTOR,
+
+            "candles_per_symbol":
+                50
+
+        },
+
+        "symbols":
+            TEST_SYMBOLS,
+
+        "results":
+            results
 
     }
