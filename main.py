@@ -927,7 +927,7 @@ def test_history():
 )
 def home():
 
-    return '''
+    return r'''
 <!DOCTYPE html>
 
 <html>
