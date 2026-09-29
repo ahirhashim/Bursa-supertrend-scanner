@@ -1101,10 +1101,6 @@ Ready.
 
 <script>
 
-async function scanUniverse() {
-
-<script>
-
 let nextStart = 0;
 let totalSignals = 0;
 let allSignals = [];
