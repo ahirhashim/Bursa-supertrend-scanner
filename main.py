@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 
 from datetime import datetime, timezone, timedelta
@@ -17,6 +18,20 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
+
+# ---------------------------------------------------------
+# RATE LIMIT PROTECTION
+# ---------------------------------------------------------
+
+# Jarak minimum antara request kepada iTick
+ITICK_REQUEST_DELAY = 1.0
+
+# Berapa kali cuba semula jika HTTP 429
+ITICK_MAX_RETRIES = 3
+
+# Cache raw candle supaya scan berulang tidak
+# terus membuat request baru kepada iTick
+CACHE_SECONDS = 60
 
 
 # =========================================================
@@ -82,6 +97,13 @@ BURSA_UNIVERSE = [
     "YTLPOWR",
     "VS"
 ]
+
+
+# =========================================================
+# SIMPLE MEMORY CACHE
+# =========================================================
+
+KLINE_CACHE = {}
 
 
 # =========================================================
@@ -1025,6 +1047,7 @@ def format_result(
 
 # =========================================================
 # FETCH KLINE DIRECT
+# WITH 429 PROTECTION + CACHE
 # =========================================================
 
 def fetch_kline(
@@ -1044,6 +1067,59 @@ def fetch_kline(
                 "ITICK_API_KEY belum diset."
 
         }
+
+
+    # -----------------------------------------------------
+    # CHECK CACHE
+    # -----------------------------------------------------
+
+    now = time.time()
+
+    cached = KLINE_CACHE.get(symbol)
+
+
+    if cached:
+
+        cached_time = cached.get(
+            "time",
+            0
+        )
+
+        cached_candles = cached.get(
+            "candles"
+        )
+
+
+        if (
+
+            cached_candles
+
+            and
+
+            (
+                now
+                - cached_time
+            )
+
+            < CACHE_SECONDS
+
+        ):
+
+            print(
+                f"CACHE HIT: {symbol}"
+            )
+
+
+            return {
+
+                "ok": True,
+
+                "symbol": symbol,
+
+                "candles":
+                    cached_candles
+
+            }
 
 
     headers = {
@@ -1077,136 +1153,264 @@ def fetch_kline(
     }
 
 
-    try:
+    # =====================================================
+    # REQUEST + RETRY
+    # =====================================================
 
-        response = requests.get(
-
-            ITICK_KLINE_URL,
-
-            params=params,
-
-            headers=headers,
-
-            timeout=20
-
-        )
-
-
-        data = response.json()
-
-
-    except requests.RequestException as error:
-
-        return {
-
-            "ok": False,
-
-            "symbol": symbol,
-
-            "error":
-                f"K-line request error: {error}"
-
-        }
-
-
-    except ValueError:
-
-        return {
-
-            "ok": False,
-
-            "symbol": symbol,
-
-            "error":
-                "K-line response bukan JSON."
-
-        }
-
-
-    if response.status_code != 200:
-
-        return {
-
-            "ok": False,
-
-            "symbol": symbol,
-
-            "error":
-                f"HTTP {response.status_code}"
-
-        }
-
-
-    if data.get("code") != 0:
-
-        return {
-
-            "ok": False,
-
-            "symbol": symbol,
-
-            "error":
-                str(data)
-
-        }
-
-
-    raw = data.get(
-        "data",
-        []
-    )
-
-
-    if not isinstance(
-        raw,
-        list
+    for attempt in range(
+        ITICK_MAX_RETRIES + 1
     ):
 
-        raw = []
+        # -------------------------------------------------
+        # DELAY BEFORE REQUEST
+        # -------------------------------------------------
+
+        if attempt == 0:
+
+            time.sleep(
+                ITICK_REQUEST_DELAY
+            )
+
+        else:
+
+            # Exponential backoff:
+            # 2s, 4s, 8s
+
+            backoff = (
+                2 ** attempt
+            )
 
 
-    if not raw:
+            print(
+                f"429 RETRY: {symbol} "
+                f"attempt {attempt}/"
+                f"{ITICK_MAX_RETRIES} "
+                f"waiting {backoff}s"
+            )
 
-        return {
 
-            "ok": False,
+            time.sleep(
+                backoff
+            )
 
-            "symbol": symbol,
 
-            "error":
-                "Tiada daily candle."
+        try:
+
+            response = requests.get(
+
+                ITICK_KLINE_URL,
+
+                params=params,
+
+                headers=headers,
+
+                timeout=20
+
+            )
+
+
+        except requests.RequestException as error:
+
+            if attempt < ITICK_MAX_RETRIES:
+
+                print(
+                    f"REQUEST RETRY: "
+                    f"{symbol} -> {error}"
+                )
+
+                continue
+
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    f"K-line request error: {error}"
+
+            }
+
+
+        # -------------------------------------------------
+        # HTTP 429
+        # -------------------------------------------------
+
+        if response.status_code == 429:
+
+            print(
+                f"HTTP 429: {symbol}"
+            )
+
+            if attempt < ITICK_MAX_RETRIES:
+
+                continue
+
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    "HTTP 429 selepas retry."
+
+            }
+
+
+        # -------------------------------------------------
+        # JSON
+        # -------------------------------------------------
+
+        try:
+
+            data = response.json()
+
+        except ValueError:
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    "K-line response bukan JSON."
+
+            }
+
+
+        # -------------------------------------------------
+        # HTTP ERROR
+        # -------------------------------------------------
+
+        if response.status_code != 200:
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    f"HTTP {response.status_code}"
+
+            }
+
+
+        # -------------------------------------------------
+        # ITICK ERROR
+        # -------------------------------------------------
+
+        if data.get("code") != 0:
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    str(data)
+
+            }
+
+
+        raw = data.get(
+            "data",
+            []
+        )
+
+
+        if not isinstance(
+            raw,
+            list
+        ):
+
+            raw = []
+
+
+        if not raw:
+
+            return {
+
+                "ok": False,
+
+                "symbol": symbol,
+
+                "error":
+                    "Tiada daily candle."
+
+            }
+
+
+        # -------------------------------------------------
+        # SORT OLD → NEW
+        # -------------------------------------------------
+
+        try:
+
+            raw = sorted(
+
+                raw,
+
+                key=lambda x:
+                    float(
+                        x.get(
+                            "t",
+                            0
+                        )
+                    )
+
+            )
+
+        except Exception:
+
+            pass
+
+
+        # -------------------------------------------------
+        # SAVE CACHE
+        # -------------------------------------------------
+
+        KLINE_CACHE[symbol] = {
+
+            "time":
+                time.time(),
+
+            "candles":
+                raw
 
         }
 
 
-    try:
-
-        raw = sorted(
-
-            raw,
-
-            key=lambda x:
-                float(
-                    x.get(
-                        "t",
-                        0
-                    )
-                )
-
+        print(
+            f"ITICK OK: {symbol} "
+            f"candles={len(raw)}"
         )
 
-    except Exception:
 
-        pass
+        return {
+
+            "ok": True,
+
+            "symbol": symbol,
+
+            "candles": raw
+
+        }
 
 
     return {
 
-        "ok": True,
+        "ok": False,
 
         "symbol": symbol,
 
-        "candles": raw
+        "error":
+            "K-line request gagal."
 
     }
 
