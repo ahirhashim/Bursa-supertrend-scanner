@@ -1,5 +1,6 @@
 import os
 import requests
+
 from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, HTTPException
@@ -15,7 +16,6 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 
-ITICK_SYMBOL_URL = "https://api-free.itick.org/symbol/list"
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 
 
@@ -28,7 +28,7 @@ SUPERTREND_FACTOR = 1.0
 
 
 # =========================================================
-# TEST UNIVERSE
+# BURSA UNIVERSE
 # =========================================================
 
 TEST_SYMBOLS = [
@@ -37,6 +37,50 @@ TEST_SYMBOLS = [
     "DNEX",
     "ZETRIX",
     "INARI"
+]
+
+
+BURSA_UNIVERSE = [
+
+    "D&O",
+    "SRIDGE",
+    "DNEX",
+    "ZETRIX",
+    "INARI",
+    "FRONTKN",
+    "JCY",
+    "GREATEC",
+    "NOTION",
+    "SNS",
+    "VSTECS",
+    "AEMULUS",
+    "MICROLN",
+    "JHM",
+
+    "TOPGLOV",
+    "SUPERMX",
+    "HARTA",
+    "KOSSAN",
+    "DXN",
+
+    "ARMADA",
+    "VELESTO",
+    "CAPITALA",
+    "MRCB",
+    "BJCORP",
+    "TANCO",
+    "JAKS",
+    "WCT",
+    "IJM",
+    "MAHSING",
+
+    "TM",
+    "AXIATA",
+    "MAXIS",
+    "DIALOG",
+    "GENM",
+    "YTLPOWR",
+    "VS"
 ]
 
 
@@ -70,7 +114,7 @@ def home():
         }
 
         .card {
-            max-width: 600px;
+            max-width: 650px;
             margin: auto;
             background: #0d1b2d;
             padding: 20px;
@@ -79,6 +123,7 @@ def home():
 
         h1 {
             font-size: 22px;
+            margin-bottom: 8px;
         }
 
         .muted {
@@ -117,51 +162,69 @@ def home():
 
         <div class="card">
 
-            <h1>BURSA SUPERTREND SCANNER</h1>
+            <h1>
+                BURSA SUPERTREND SCANNER
+            </h1>
 
             <p class="muted">
-                iTick OHLC Verification • INARI • Daily
+                Bursa Universe • Daily • ATR 10 / Factor 1.0
             </p>
 
-            <button onclick="checkINARIOHLC()">
-                CHECK INARI OHLC
+
+            <button onclick="testUniverse()">
+                SCAN BURSA UNIVERSE
             </button>
+
 
             <button onclick="testHistory()">
                 TEST HISTORICAL SIGNAL
             </button>
 
-            <pre id="out">Belum diuji.</pre>
+
+            <pre id="out">
+Belum scan.
+            </pre>
 
         </div>
 
 
         <script>
 
-        async function checkINARIOHLC() {
+        async function testUniverse() {
 
             const out =
                 document.getElementById("out");
 
+
             out.textContent =
-                "Sedang mengambil OHLC INARI daripada iTick...";
+                "Sedang scan Bursa Universe...";
 
 
             try {
 
                 const response =
-                    await fetch("/api/test/inari-ohlc");
+                    await fetch(
+                        "/api/test/universe"
+                    );
+
 
                 const data =
                     await response.json();
 
+
                 out.textContent =
-                    JSON.stringify(data, null, 2);
+                    JSON.stringify(
+                        data,
+                        null,
+                        2
+                    );
+
 
             } catch (error) {
 
                 out.textContent =
-                    "Ralat sambungan: " + error;
+                    "Ralat sambungan: "
+                    + error;
 
             }
 
@@ -173,6 +236,7 @@ def home():
             const out =
                 document.getElementById("out");
 
+
             out.textContent =
                 "Sedang mencari signal sejarah...";
 
@@ -180,18 +244,28 @@ def home():
             try {
 
                 const response =
-                    await fetch("/api/test/history");
+                    await fetch(
+                        "/api/test/history"
+                    );
+
 
                 const data =
                     await response.json();
 
+
                 out.textContent =
-                    JSON.stringify(data, null, 2);
+                    JSON.stringify(
+                        data,
+                        null,
+                        2
+                    );
+
 
             } catch (error) {
 
                 out.textContent =
-                    "Ralat sambungan: " + error;
+                    "Ralat sambungan: "
+                    + error;
 
             }
 
@@ -213,8 +287,12 @@ def home():
 def health():
 
     return {
+
         "ok": True,
-        "service": "bursa-supertrend-scanner"
+
+        "service":
+            "bursa-supertrend-scanner"
+
     }
 
 
@@ -222,32 +300,53 @@ def health():
 # TRUE RANGE
 # =========================================================
 
-def true_range(high, low, previous_close):
+def true_range(
+    high,
+    low,
+    previous_close
+):
 
     if previous_close is None:
 
         return high - low
 
+
     return max(
+
         high - low,
-        abs(high - previous_close),
-        abs(low - previous_close)
+
+        abs(
+            high - previous_close
+        ),
+
+        abs(
+            low - previous_close
+        )
+
     )
 
 
 # =========================================================
-# RMA / WILDER ATR
+# WILDER ATR / RMA
 # =========================================================
 
-def calculate_atr(candles, length):
+def calculate_atr(
+    candles,
+    length
+):
 
     tr_values = []
 
 
     for i, candle in enumerate(candles):
 
-        high = float(candle["h"])
-        low = float(candle["l"])
+        high = float(
+            candle["h"]
+        )
+
+        low = float(
+            candle["l"]
+        )
 
 
         if i == 0:
@@ -262,16 +361,22 @@ def calculate_atr(candles, length):
 
 
         tr = true_range(
+
             high,
+
             low,
+
             previous_close
+
         )
 
 
         tr_values.append(tr)
 
 
-    atr_values = [None] * len(candles)
+    atr_values = [
+        None
+    ] * len(candles)
 
 
     if len(tr_values) < length:
@@ -280,30 +385,49 @@ def calculate_atr(candles, length):
 
 
     first_atr = (
-        sum(tr_values[:length])
+
+        sum(
+            tr_values[:length]
+        )
+
         / length
+
     )
 
 
-    atr_values[length - 1] = first_atr
+    atr_values[
+        length - 1
+    ] = first_atr
 
 
     previous_atr = first_atr
 
 
-    for i in range(length, len(tr_values)):
+    for i in range(
+        length,
+        len(tr_values)
+    ):
 
         current_atr = (
+
             (
-                previous_atr * (length - 1)
+                previous_atr
+                * (length - 1)
             )
+
             + tr_values[i]
+
         ) / length
 
 
-        atr_values[i] = current_atr
+        atr_values[i] = (
+            current_atr
+        )
 
-        previous_atr = current_atr
+
+        previous_atr = (
+            current_atr
+        )
 
 
     return atr_values
@@ -320,8 +444,11 @@ def calculate_supertrend(
 ):
 
     atr_values = calculate_atr(
+
         candles,
+
         atr_length
+
     )
 
 
@@ -329,16 +456,29 @@ def calculate_supertrend(
 
 
     previous_final_upper = None
+
     previous_final_lower = None
+
     previous_direction = None
+
     previous_close = None
 
 
-    for i, candle in enumerate(candles):
+    for i, candle in enumerate(
+        candles
+    ):
 
-        high = float(candle["h"])
-        low = float(candle["l"])
-        close = float(candle["c"])
+        high = float(
+            candle["h"]
+        )
+
+        low = float(
+            candle["l"]
+        )
+
+        close = float(
+            candle["c"]
+        )
 
 
         atr = atr_values[i]
@@ -346,36 +486,72 @@ def calculate_supertrend(
 
         result = dict(candle)
 
+
         result["atr"] = atr
 
 
         if atr is None:
 
-            result["supertrend"] = None
-            result["direction"] = None
-            result["trend"] = None
-            result["flip"] = False
-            result["high_break"] = False
-            result["signal"] = 0
-            result["signal_name"] = "NONE"
+            result[
+                "supertrend"
+            ] = None
 
-            results.append(result)
+            result[
+                "direction"
+            ] = None
 
-            previous_close = close
+            result[
+                "trend"
+            ] = None
+
+            result[
+                "flip"
+            ] = False
+
+            result[
+                "high_break"
+            ] = False
+
+            result[
+                "signal"
+            ] = 0
+
+            result[
+                "signal_name"
+            ] = "NONE"
+
+
+            results.append(
+                result
+            )
+
+
+            previous_close = (
+                close
+            )
+
 
             continue
 
 
-        hl2 = (high + low) / 2.0
+        hl2 = (
+            high + low
+        ) / 2.0
 
 
         basic_upper = (
-            hl2 + factor * atr
+
+            hl2
+            + factor * atr
+
         )
 
 
         basic_lower = (
-            hl2 - factor * atr
+
+            hl2
+            - factor * atr
+
         )
 
 
@@ -383,50 +559,88 @@ def calculate_supertrend(
         # FINAL UPPER
         # -------------------------------------------------
 
-        if previous_final_upper is None:
+        if (
+            previous_final_upper
+            is None
+        ):
 
-            final_upper = basic_upper
+            final_upper = (
+                basic_upper
+            )
 
         else:
 
             if (
-                basic_upper < previous_final_upper
+
+                basic_upper
+                < previous_final_upper
+
                 or (
-                    previous_close is not None
-                    and previous_close > previous_final_upper
+
+                    previous_close
+                    is not None
+
+                    and
+                    previous_close
+                    > previous_final_upper
+
                 )
+
             ):
 
-                final_upper = basic_upper
+                final_upper = (
+                    basic_upper
+                )
 
             else:
 
-                final_upper = previous_final_upper
+                final_upper = (
+                    previous_final_upper
+                )
 
 
         # -------------------------------------------------
         # FINAL LOWER
         # -------------------------------------------------
 
-        if previous_final_lower is None:
+        if (
+            previous_final_lower
+            is None
+        ):
 
-            final_lower = basic_lower
+            final_lower = (
+                basic_lower
+            )
 
         else:
 
             if (
-                basic_lower > previous_final_lower
+
+                basic_lower
+                > previous_final_lower
+
                 or (
-                    previous_close is not None
-                    and previous_close < previous_final_lower
+
+                    previous_close
+                    is not None
+
+                    and
+                    previous_close
+                    < previous_final_lower
+
                 )
+
             ):
 
-                final_lower = basic_lower
+                final_lower = (
+                    basic_lower
+                )
 
             else:
 
-                final_lower = previous_final_lower
+                final_lower = (
+                    previous_final_lower
+                )
 
 
         # -------------------------------------------------
@@ -436,9 +650,15 @@ def calculate_supertrend(
         #  1 = BEAR
         # -------------------------------------------------
 
-        if previous_direction is None:
+        if (
+            previous_direction
+            is None
+        ):
 
-            if close <= final_upper:
+            if (
+                close
+                <= final_upper
+            ):
 
                 direction = 1
 
@@ -447,9 +667,15 @@ def calculate_supertrend(
                 direction = -1
 
 
-        elif previous_direction == 1:
+        elif (
+            previous_direction
+            == 1
+        ):
 
-            if close > final_upper:
+            if (
+                close
+                > final_upper
+            ):
 
                 direction = -1
 
@@ -460,7 +686,10 @@ def calculate_supertrend(
 
         else:
 
-            if close < final_lower:
+            if (
+                close
+                < final_lower
+            ):
 
                 direction = 1
 
@@ -475,11 +704,15 @@ def calculate_supertrend(
 
         if direction < 0:
 
-            supertrend = final_lower
+            supertrend = (
+                final_lower
+            )
 
         else:
 
-            supertrend = final_upper
+            supertrend = (
+                final_upper
+            )
 
 
         # -------------------------------------------------
@@ -501,10 +734,20 @@ def calculate_supertrend(
 
         flip = False
 
+
         if (
-            previous_direction is not None
-            and previous_direction > 0
-            and direction < 0
+
+            previous_direction
+            is not None
+
+            and
+            previous_direction
+            > 0
+
+            and
+            direction
+            < 0
+
         ):
 
             flip = True
@@ -525,8 +768,13 @@ def calculate_supertrend(
 
 
             if (
+
                 direction < 0
-                and close > previous_high
+
+                and
+                close
+                > previous_high
+
             ):
 
                 high_break = True
@@ -536,67 +784,131 @@ def calculate_supertrend(
         # SIGNAL
         # -------------------------------------------------
 
-        if flip and high_break:
+        if (
+            flip
+            and
+            high_break
+        ):
 
             signal = 3
-            signal_name = "FLIP + HIGH BREAK"
+
+            signal_name = (
+                "FLIP + HIGH BREAK"
+            )
+
 
         elif flip:
 
             signal = 1
-            signal_name = "FLIP"
+
+            signal_name = (
+                "FLIP"
+            )
+
 
         elif high_break:
 
             signal = 2
-            signal_name = "HIGH BREAK"
+
+            signal_name = (
+                "HIGH BREAK"
+            )
+
 
         else:
 
             signal = 0
-            signal_name = "NONE"
+
+            signal_name = (
+                "NONE"
+            )
 
 
         # -------------------------------------------------
         # SAVE
         # -------------------------------------------------
 
-        result["basic_upper"] = basic_upper
-        result["basic_lower"] = basic_lower
-        result["final_upper"] = final_upper
-        result["final_lower"] = final_lower
+        result[
+            "basic_upper"
+        ] = basic_upper
 
-        result["supertrend"] = supertrend
-        result["direction"] = direction
-        result["trend"] = trend
+        result[
+            "basic_lower"
+        ] = basic_lower
 
-        result["flip"] = flip
-        result["high_break"] = high_break
-        result["signal"] = signal
-        result["signal_name"] = signal_name
+        result[
+            "final_upper"
+        ] = final_upper
+
+        result[
+            "final_lower"
+        ] = final_lower
+
+        result[
+            "supertrend"
+        ] = supertrend
+
+        result[
+            "direction"
+        ] = direction
+
+        result[
+            "trend"
+        ] = trend
+
+        result[
+            "flip"
+        ] = flip
+
+        result[
+            "high_break"
+        ] = high_break
+
+        result[
+            "signal"
+        ] = signal
+
+        result[
+            "signal_name"
+        ] = signal_name
 
 
-        results.append(result)
+        results.append(
+            result
+        )
 
 
         # -------------------------------------------------
         # UPDATE
         # -------------------------------------------------
 
-        previous_final_upper = final_upper
-        previous_final_lower = final_lower
-        previous_direction = direction
-        previous_close = close
+        previous_final_upper = (
+            final_upper
+        )
+
+        previous_final_lower = (
+            final_lower
+        )
+
+        previous_direction = (
+            direction
+        )
+
+        previous_close = (
+            close
+        )
 
 
     return results
 
 
 # =========================================================
-# FORMAT DATE
+# FORMAT TIMESTAMP — MALAYSIA UTC+8
 # =========================================================
 
-def format_timestamp(timestamp):
+def format_timestamp(
+    timestamp
+):
 
     try:
 
@@ -604,12 +916,20 @@ def format_timestamp(timestamp):
             timedelta(hours=8)
         )
 
+
         dt = datetime.fromtimestamp(
+
             float(timestamp) / 1000,
+
             tz=malaysia_tz
+
         )
 
-        return dt.strftime("%Y-%m-%d")
+
+        return dt.strftime(
+            "%Y-%m-%d"
+        )
+
 
     except Exception:
 
@@ -620,302 +940,259 @@ def format_timestamp(timestamp):
 # FORMAT RESULT
 # =========================================================
 
-def format_result(candle):
+def format_result(
+    candle
+):
 
     return {
 
-        "date": format_timestamp(
-            candle.get("t")
-        ),
+        "date":
+            format_timestamp(
+                candle.get("t")
+            ),
 
-        "close": candle.get("c"),
+        "close":
+            candle.get("c"),
 
-        "high": candle.get("h"),
+        "high":
+            candle.get("h"),
 
-        "low": candle.get("l"),
+        "low":
+            candle.get("l"),
 
-        "atr10": (
+        "atr10":
+
             round(
                 candle["atr"],
                 6
             )
-            if candle.get("atr") is not None
-            else None
-        ),
 
-        "supertrend": (
+            if candle.get("atr")
+            is not None
+
+            else None,
+
+        "supertrend":
+
             round(
                 candle["supertrend"],
                 6
             )
-            if candle.get("supertrend") is not None
-            else None
-        ),
 
-        "direction": candle.get(
-            "direction"
-        ),
+            if candle.get(
+                "supertrend"
+            )
+            is not None
 
-        "trend": candle.get(
-            "trend"
-        ),
+            else None,
 
-        "flip": candle.get(
-            "flip",
-            False
-        ),
+        "direction":
+            candle.get(
+                "direction"
+            ),
 
-        "high_break": candle.get(
-            "high_break",
-            False
-        ),
+        "trend":
+            candle.get(
+                "trend"
+            ),
 
-        "signal": candle.get(
-            "signal",
-            0
-        ),
+        "flip":
+            candle.get(
+                "flip",
+                False
+            ),
 
-        "signal_name": candle.get(
-            "signal_name",
-            "NONE"
-        )
+        "high_break":
+            candle.get(
+                "high_break",
+                False
+            ),
+
+        "signal":
+            candle.get(
+                "signal",
+                0
+            ),
+
+        "signal_name":
+            candle.get(
+                "signal_name",
+                "NONE"
+            )
+
     }
 
 
 # =========================================================
-# FETCH ONE SYMBOL
+# FETCH KLINE DIRECT
 # =========================================================
 
-def fetch_symbol_data(symbol):
+def fetch_kline(
+    symbol,
+    limit=50
+):
+
+    if not ITICK_API_KEY:
+
+        return {
+
+            "ok": False,
+
+            "symbol": symbol,
+
+            "error":
+                "ITICK_API_KEY belum diset."
+
+        }
+
 
     headers = {
-        "accept": "application/json",
-        "token": ITICK_API_KEY
+
+        "accept":
+            "application/json",
+
+        "token":
+            ITICK_API_KEY
+
     }
 
 
-    # =====================================================
-    # SYMBOL LOOKUP
-    # =====================================================
+    params = {
 
-    symbol_params = {
-        "type": "stock",
-        "region": "MY",
-        "code": symbol
+        "region":
+            "MY",
+
+        "exchange":
+            "MYX",
+
+        "code":
+            symbol,
+
+        "kType":
+            8,
+
+        "limit":
+            limit
+
     }
 
 
     try:
 
-        symbol_response = requests.get(
-            ITICK_SYMBOL_URL,
-            params=symbol_params,
+        response = requests.get(
+
+            ITICK_KLINE_URL,
+
+            params=params,
+
             headers=headers,
+
             timeout=20
+
         )
 
 
-        symbol_data = (
-            symbol_response.json()
-        )
+        data = response.json()
 
 
     except requests.RequestException as error:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
+
             "error":
-                f"Symbol lookup request error: {error}"
+                f"K-line request error: {error}"
+
         }
 
 
     except ValueError:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
+
             "error":
-                "Symbol lookup bukan JSON."
+                "K-line response bukan JSON."
+
         }
 
 
-    if symbol_response.status_code != 200:
+    if response.status_code != 200:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
+
             "error":
-                f"Symbol HTTP error: {symbol_response.status_code}"
+                f"HTTP {response.status_code}"
+
         }
 
 
-    if symbol_data.get("code") != 0:
+    if data.get("code") != 0:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
+
             "error":
-                f"Symbol lookup error: {symbol_data}"
+                str(data)
+
         }
 
 
-    symbol_list = symbol_data.get(
+    raw = data.get(
         "data",
         []
     )
 
 
     if not isinstance(
-        symbol_list,
+        raw,
         list
     ):
 
-        symbol_list = []
+        raw = []
 
 
-    if not symbol_list:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error":
-                "Symbol tidak dijumpai."
-        }
-
-
-    symbol_info = symbol_list[0]
-
-
-    actual_code = symbol_info.get("c")
-    actual_name = symbol_info.get("n")
-    actual_exchange = symbol_info.get("e")
-
-
-    if not actual_code:
+    if not raw:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
-            "error":
-                "Symbol tiada code."
-        }
 
-
-    # =====================================================
-    # KLINE
-    # =====================================================
-
-    kline_params = {
-
-        "region": "MY",
-
-        "exchange":
-            actual_exchange or "",
-
-        "code":
-            actual_code,
-
-        "kType":
-            8,
-
-        "limit":
-            50
-    }
-
-
-    try:
-
-        kline_response = requests.get(
-            ITICK_KLINE_URL,
-            params=kline_params,
-            headers=headers,
-            timeout=20
-        )
-
-
-        kline_data = (
-            kline_response.json()
-        )
-
-
-    except requests.RequestException as error:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error":
-                f"K-line request error: {error}"
-        }
-
-
-    except ValueError:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error":
-                "K-line bukan JSON."
-        }
-
-
-    if kline_response.status_code != 200:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error":
-                f"K-line HTTP error: {kline_response.status_code}"
-        }
-
-
-    if kline_data.get("code") != 0:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error":
-                f"K-line error: {kline_data}"
-        }
-
-
-    raw = kline_data.get(
-        "data",
-        []
-    )
-
-
-    if isinstance(raw, list):
-
-        candles = raw
-
-    else:
-
-        candles = []
-
-
-    if not candles:
-
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "name": actual_name,
-            "exchange": actual_exchange,
             "error":
                 "Tiada daily candle."
+
         }
 
 
-    # =====================================================
-    # SORT OLD -> NEW
-    # =====================================================
-
     try:
 
-        candles = sorted(
-            candles,
+        raw = sorted(
+
+            raw,
+
             key=lambda x:
-                float(x.get("t", 0))
+                float(
+                    x.get(
+                        "t",
+                        0
+                    )
+                )
+
         )
 
     except Exception:
@@ -923,158 +1200,190 @@ def fetch_symbol_data(symbol):
         pass
 
 
-    # =====================================================
-    # CALCULATE
-    # =====================================================
+    return {
 
-    calculated = calculate_supertrend(
-        candles,
-        ATR_LENGTH,
-        SUPERTREND_FACTOR
+        "ok": True,
+
+        "symbol": symbol,
+
+        "candles": raw
+
+    }
+
+
+# =========================================================
+# CALCULATE ONE SYMBOL
+# =========================================================
+
+def calculate_symbol(
+    symbol
+):
+
+    fetched = fetch_kline(
+        symbol,
+        50
+    )
+
+
+    if not fetched.get("ok"):
+
+        return fetched
+
+
+    candles = fetched[
+        "candles"
+    ]
+
+
+    calculated = (
+        calculate_supertrend(
+
+            candles,
+
+            ATR_LENGTH,
+
+            SUPERTREND_FACTOR
+
+        )
     )
 
 
     if not calculated:
 
         return {
+
             "ok": False,
+
             "symbol": symbol,
+
             "error":
-                "Supertrend tidak dapat dikira."
+                "Supertrend calculation gagal."
+
         }
 
 
     latest = calculated[-1]
 
 
-    # =====================================================
-    # HISTORICAL SIGNALS
-    # =====================================================
-
     historical_signals = []
 
 
     for candle in calculated:
 
-        if candle.get(
-            "signal",
-            0
-        ) != 0:
+        if (
+            candle.get(
+                "signal",
+                0
+            ) != 0
+        ):
 
             historical_signals.append(
-                format_result(candle)
+
+                format_result(
+                    candle
+                )
+
             )
 
-
-    # =====================================================
-    # RETURN
-    # =====================================================
 
     return {
 
         "ok": True,
 
-        "symbol":
-            actual_code,
-
-        "name":
-            actual_name,
-
-        "exchange":
-            actual_exchange,
+        "symbol": symbol,
 
         "latest":
-            format_result(latest),
+            format_result(
+                latest
+            ),
 
         "historical_signals":
-            historical_signals,
+            historical_signals
 
-        # Simpan candle mentah untuk verification.
-        "raw_candles":
-            candles
     }
 
 
 # =========================================================
-# INARI OHLC VERIFICATION
+# TEST 5 COUNTERS
 # =========================================================
 
-@app.get("/api/test/inari-ohlc")
-def test_inari_ohlc():
+@app.get("/api/test/5")
+def test_five():
 
     if not ITICK_API_KEY:
 
         raise HTTPException(
+
             status_code=500,
+
             detail=
-                "ITICK_API_KEY belum diset dalam Render Environment."
+                "ITICK_API_KEY belum diset."
+
         )
 
 
-    result = fetch_symbol_data(
-        "INARI"
-    )
+    scanner = []
 
 
-    if not result.get("ok"):
+    for symbol in TEST_SYMBOLS:
 
-        raise HTTPException(
-            status_code=502,
-            detail=result
+        result = calculate_symbol(
+            symbol
         )
 
 
-    candles = result.get(
-        "raw_candles",
-        []
-    )
+        if not result.get("ok"):
 
+            scanner.append({
 
-    selected = []
+                "symbol":
+                    symbol,
 
+                "status":
+                    "ERROR",
 
-    # =====================================================
-    # AMBIL CANDLE SEKITAR 30 JULAI
-    # =====================================================
-
-    for candle in candles:
-
-        date_string = format_timestamp(
-            candle.get("t")
-        )
-
-
-        if (
-            "2026-07-25"
-            <= date_string
-            <=
-            "2026-08-05"
-        ):
-
-            selected.append({
-
-                "date":
-                    date_string,
-
-                "open":
-                    candle.get("o"),
-
-                "high":
-                    candle.get("h"),
-
-                "low":
-                    candle.get("l"),
-
-                "close":
-                    candle.get("c"),
-
-                "volume":
-                    candle.get("v"),
-
-                "timestamp":
-                    candle.get("t")
+                "error":
+                    result.get(
+                        "error"
+                    )
 
             })
+
+            continue
+
+
+        latest = result[
+            "latest"
+        ]
+
+
+        scanner.append({
+
+            "symbol":
+                symbol,
+
+            "close":
+                latest["close"],
+
+            "supertrend":
+                latest["supertrend"],
+
+            "trend":
+                latest["trend"],
+
+            "flip":
+                latest["flip"],
+
+            "high_break":
+                latest["high_break"],
+
+            "signal":
+                latest["signal"],
+
+            "signal_name":
+                latest["signal_name"]
+
+        })
 
 
     return {
@@ -1082,33 +1391,184 @@ def test_inari_ohlc():
         "ok": True,
 
         "stage":
-            "inari_ohlc_verification",
-
-        "symbol":
-            "INARI",
-
-        "exchange":
-            result.get(
-                "exchange"
-            ),
+            "universe_5_complete",
 
         "timeframe":
             "1D",
 
-        "range":
-            "2026-07-25 to 2026-08-05",
+        "settings": {
+
+            "atr_length":
+                ATR_LENGTH,
+
+            "factor":
+                SUPERTREND_FACTOR
+
+        },
 
         "count":
-            len(selected),
+            len(TEST_SYMBOLS),
 
-        "candles":
-            selected
+        "scanner":
+            scanner
 
     }
 
 
 # =========================================================
-# TEST HISTORICAL SIGNAL
+# BURSA UNIVERSE SCANNER
+# =========================================================
+
+@app.get("/api/test/universe")
+def test_universe():
+
+    if not ITICK_API_KEY:
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=
+                "ITICK_API_KEY belum diset."
+
+        )
+
+
+    scanner = []
+
+    signals_only = []
+
+    errors = []
+
+
+    for symbol in BURSA_UNIVERSE:
+
+        result = calculate_symbol(
+            symbol
+        )
+
+
+        if not result.get("ok"):
+
+            error_item = {
+
+                "symbol":
+                    symbol,
+
+                "error":
+                    result.get(
+                        "error"
+                    )
+
+            }
+
+
+            errors.append(
+                error_item
+            )
+
+
+            continue
+
+
+        latest = result[
+            "latest"
+        ]
+
+
+        item = {
+
+            "symbol":
+                symbol,
+
+            "close":
+                latest["close"],
+
+            "supertrend":
+                latest["supertrend"],
+
+            "trend":
+                latest["trend"],
+
+            "flip":
+                latest["flip"],
+
+            "high_break":
+                latest["high_break"],
+
+            "signal":
+                latest["signal"],
+
+            "signal_name":
+                latest["signal_name"]
+
+        }
+
+
+        scanner.append(
+            item
+        )
+
+
+        # -------------------------------------------------
+        # CURRENT SIGNAL ONLY
+        # -------------------------------------------------
+
+        if (
+            latest.get(
+                "signal",
+                0
+            ) != 0
+        ):
+
+            signals_only.append(
+                item
+            )
+
+
+    return {
+
+        "ok": True,
+
+        "stage":
+            "universe_complete",
+
+        "timeframe":
+            "1D",
+
+        "settings": {
+
+            "atr_length":
+                ATR_LENGTH,
+
+            "factor":
+                SUPERTREND_FACTOR
+
+        },
+
+        "requested_count":
+            len(BURSA_UNIVERSE),
+
+        "successful_count":
+            len(scanner),
+
+        "error_count":
+            len(errors),
+
+        "scanner":
+            scanner,
+
+        "signals_only":
+            signals_only,
+
+        "errors":
+            errors
+
+    }
+
+
+# =========================================================
+# HISTORICAL TEST — 5 COUNTERS
 # =========================================================
 
 @app.get("/api/test/history")
@@ -1117,9 +1577,12 @@ def test_history():
     if not ITICK_API_KEY:
 
         raise HTTPException(
+
             status_code=500,
+
             detail=
-                "ITICK_API_KEY belum diset dalam Render Environment."
+                "ITICK_API_KEY belum diset."
+
         )
 
 
@@ -1128,7 +1591,7 @@ def test_history():
 
     for symbol in TEST_SYMBOLS:
 
-        result = fetch_symbol_data(
+        result = calculate_symbol(
             symbol
         )
 
@@ -1154,25 +1617,23 @@ def test_history():
 
 
         historical = result.get(
+
             "historical_signals",
+
             []
+
         )
 
 
         results.append({
 
             "symbol":
-                result.get(
-                    "symbol"
-                ),
-
-            "name":
-                result.get(
-                    "name"
-                ),
+                symbol,
 
             "signal_count":
-                len(historical),
+                len(
+                    historical
+                ),
 
             "signals":
                 historical
