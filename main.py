@@ -1507,48 +1507,6 @@ async function testHistory() {
     }
 }
 
-</script>
-
-async function testHistory() {
-
-    const out =
-        document.getElementById("out");
-
-    out.textContent =
-        "Testing historical signals...";
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/test/history"
-            );
-
-        if (!response.ok) {
-
-            throw new Error(
-                "HTTP " +
-                response.status
-            );
-        }
-
-        const data =
-            await response.json();
-
-        out.textContent =
-            JSON.stringify(
-                data,
-                null,
-                2
-            );
-
-    } catch (error) {
-
-        out.textContent =
-            "HISTORY ERROR\n\n" +
-            error;
-    }
-}
 
 </script>
 
