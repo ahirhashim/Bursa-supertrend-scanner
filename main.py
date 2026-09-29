@@ -106,11 +106,11 @@ def home():
             <h1>BURSA SUPERTREND SCANNER</h1>
 
             <p class="muted">
-                D&O Supertrend test • Daily • ATR 10 / Factor 1.0
+                D&O Signal Test • Daily • ATR 10 / Factor 1.0
             </p>
 
             <button onclick="testDO()">
-                TEST D&O SUPERTREND
+                TEST D&O SIGNAL
             </button>
 
             <pre id="out">Belum diuji.</pre>
@@ -126,7 +126,7 @@ def home():
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang mengambil data D&O dan mengira Supertrend...";
+                "Sedang mengambil data D&O dan mengira signal...";
 
 
             try {
@@ -177,7 +177,9 @@ def health():
 def true_range(high, low, previous_close):
 
     if previous_close is None:
+
         return high - low
+
 
     return max(
         high - low,
@@ -194,10 +196,12 @@ def calculate_atr(candles, length):
 
     tr_values = []
 
+
     for i, candle in enumerate(candles):
 
         high = float(candle["h"])
         low = float(candle["l"])
+
 
         if i == 0:
 
@@ -205,7 +209,9 @@ def calculate_atr(candles, length):
 
         else:
 
-            previous_close = float(candles[i - 1]["c"])
+            previous_close = float(
+                candles[i - 1]["c"]
+            )
 
 
         tr = true_range(
@@ -213,6 +219,7 @@ def calculate_atr(candles, length):
             low,
             previous_close
         )
+
 
         tr_values.append(tr)
 
@@ -226,21 +233,24 @@ def calculate_atr(candles, length):
 
 
     # -----------------------------------------------------
-    # INITIAL RMA = SMA OF FIRST LENGTH TRUE RANGES
+    # INITIAL RMA
     # -----------------------------------------------------
 
-    first_atr = sum(
-        tr_values[:length]
-    ) / length
+    first_atr = (
+        sum(tr_values[:length])
+        / length
+    )
+
 
     atr_values[length - 1] = first_atr
+
+
+    previous_atr = first_atr
 
 
     # -----------------------------------------------------
     # WILDER RMA
     # -----------------------------------------------------
-
-    previous_atr = first_atr
 
     for i in range(length, len(tr_values)):
 
@@ -250,6 +260,7 @@ def calculate_atr(candles, length):
             )
             + tr_values[i]
         ) / length
+
 
         atr_values[i] = current_atr
 
@@ -263,7 +274,11 @@ def calculate_atr(candles, length):
 # SUPERTREND
 # =========================================================
 
-def calculate_supertrend(candles, atr_length, factor):
+def calculate_supertrend(
+    candles,
+    atr_length,
+    factor
+):
 
     atr_values = calculate_atr(
         candles,
@@ -296,7 +311,7 @@ def calculate_supertrend(candles, atr_length, factor):
 
 
         # -------------------------------------------------
-        # NOT ENOUGH DATA FOR ATR
+        # ATR BELUM CUKUP
         # -------------------------------------------------
 
         if atr is None:
@@ -307,6 +322,11 @@ def calculate_supertrend(candles, atr_length, factor):
             result["final_lower"] = None
             result["supertrend"] = None
             result["direction"] = None
+            result["trend"] = None
+            result["flip"] = False
+            result["high_break"] = False
+            result["signal"] = 0
+            result["signal_name"] = "NONE"
 
             results.append(result)
 
@@ -315,6 +335,10 @@ def calculate_supertrend(candles, atr_length, factor):
             continue
 
 
+        # -------------------------------------------------
+        # BASIC BANDS
+        # -------------------------------------------------
+
         hl2 = (high + low) / 2.0
 
 
@@ -322,13 +346,14 @@ def calculate_supertrend(candles, atr_length, factor):
             hl2 + factor * atr
         )
 
+
         basic_lower = (
             hl2 - factor * atr
         )
 
 
         # -------------------------------------------------
-        # FINAL UPPER BAND
+        # FINAL UPPER
         # -------------------------------------------------
 
         if previous_final_upper is None:
@@ -353,7 +378,7 @@ def calculate_supertrend(candles, atr_length, factor):
 
 
         # -------------------------------------------------
-        # FINAL LOWER BAND
+        # FINAL LOWER
         # -------------------------------------------------
 
         if previous_final_lower is None:
@@ -381,6 +406,7 @@ def calculate_supertrend(candles, atr_length, factor):
         # DIRECTION
         #
         # TradingView convention:
+        #
         # -1 = BULL
         #  1 = BEAR
         # -------------------------------------------------
@@ -432,6 +458,99 @@ def calculate_supertrend(candles, atr_length, factor):
 
 
         # -------------------------------------------------
+        # TREND
+        # -------------------------------------------------
+
+        if direction < 0:
+
+            trend = "BULL"
+
+        else:
+
+            trend = "BEAR"
+
+
+        # =================================================
+        # SIGNAL LOGIC
+        # =================================================
+
+        flip = False
+        high_break = False
+
+
+        # -------------------------------------------------
+        # FLIP
+        #
+        # BEAR -> BULL
+        #
+        # Same logic as V6.9.2:
+        #
+        # previous direction > 0
+        # current direction < 0
+        # -------------------------------------------------
+
+        if (
+            previous_direction is not None
+            and previous_direction > 0
+            and direction < 0
+        ):
+
+            flip = True
+
+
+        # -------------------------------------------------
+        # HIGH BREAK
+        #
+        # Current candle is BULL and
+        # current close > previous candle high
+        # -------------------------------------------------
+
+        if i > 0:
+
+            previous_high = float(
+                candles[i - 1]["h"]
+            )
+
+
+            if (
+                direction < 0
+                and close > previous_high
+            ):
+
+                high_break = True
+
+
+        # -------------------------------------------------
+        # SIGNAL NUMBER
+        #
+        # 0 = NONE
+        # 1 = FLIP ONLY
+        # 2 = HIGH BREAK ONLY
+        # 3 = FLIP + HIGH BREAK
+        # -------------------------------------------------
+
+        if flip and high_break:
+
+            signal = 3
+            signal_name = "FLIP + HIGH BREAK"
+
+        elif flip:
+
+            signal = 1
+            signal_name = "FLIP"
+
+        elif high_break:
+
+            signal = 2
+            signal_name = "HIGH BREAK"
+
+        else:
+
+            signal = 0
+            signal_name = "NONE"
+
+
+        # -------------------------------------------------
         # SAVE RESULT
         # -------------------------------------------------
 
@@ -441,19 +560,20 @@ def calculate_supertrend(candles, atr_length, factor):
         result["final_lower"] = final_lower
         result["supertrend"] = supertrend
         result["direction"] = direction
+        result["trend"] = trend
 
-
-        if direction < 0:
-
-            result["trend"] = "BULL"
-
-        else:
-
-            result["trend"] = "BEAR"
+        result["flip"] = flip
+        result["high_break"] = high_break
+        result["signal"] = signal
+        result["signal_name"] = signal_name
 
 
         results.append(result)
 
+
+        # -------------------------------------------------
+        # UPDATE PREVIOUS VALUES
+        # -------------------------------------------------
 
         previous_final_upper = final_upper
         previous_final_lower = final_lower
@@ -477,11 +597,79 @@ def format_timestamp(timestamp):
             tz=timezone.utc
         )
 
+
         return dt.strftime("%Y-%m-%d")
+
 
     except Exception:
 
         return str(timestamp)
+
+
+# =========================================================
+# FORMAT RESULT
+# =========================================================
+
+def format_result(candle):
+
+    return {
+
+        "date": format_timestamp(
+            candle.get("t")
+        ),
+
+        "close": candle.get("c"),
+
+        "high": candle.get("h"),
+
+        "low": candle.get("l"),
+
+        "atr10": (
+            round(
+                candle["atr"],
+                6
+            )
+            if candle.get("atr") is not None
+            else None
+        ),
+
+        "supertrend": (
+            round(
+                candle["supertrend"],
+                6
+            )
+            if candle.get("supertrend") is not None
+            else None
+        ),
+
+        "direction": candle.get(
+            "direction"
+        ),
+
+        "trend": candle.get(
+            "trend"
+        ),
+
+        "flip": candle.get(
+            "flip",
+            False
+        ),
+
+        "high_break": candle.get(
+            "high_break",
+            False
+        ),
+
+        "signal": candle.get(
+            "signal",
+            0
+        ),
+
+        "signal_name": candle.get(
+            "signal_name",
+            "NONE"
+        )
+    }
 
 
 # =========================================================
@@ -587,10 +775,16 @@ def test_do():
         )
 
 
-    symbol_list = symbol_data.get("data", [])
+    symbol_list = symbol_data.get(
+        "data",
+        []
+    )
 
 
-    if not isinstance(symbol_list, list):
+    if not isinstance(
+        symbol_list,
+        list
+    ):
 
         symbol_list = []
 
@@ -602,13 +796,22 @@ def test_do():
     if not symbol_list:
 
         return {
+
             "ok": False,
+
             "stage": "symbol_lookup",
-            "message": "iTick tidak memulangkan symbol untuk D&O.",
+
+            "message":
+                "iTick tidak memulangkan symbol untuk D&O.",
+
             "requested_symbol": "D&O",
+
             "region": "MY",
+
             "symbol_lookup": [],
+
             "count": 0,
+
             "candles": []
         }
 
@@ -618,6 +821,7 @@ def test_do():
     # =====================================================
 
     symbol_info = symbol_list[0]
+
 
     actual_code = symbol_info.get("c")
     actual_name = symbol_info.get("n")
@@ -629,10 +833,12 @@ def test_do():
         actual_code
     )
 
+
     print(
         "FOUND SYMBOL NAME:",
         actual_name
     )
+
 
     print(
         "FOUND EXCHANGE:",
@@ -647,11 +853,19 @@ def test_do():
     if not actual_code:
 
         return {
+
             "ok": False,
+
             "stage": "symbol_lookup",
-            "message": "iTick pulangkan symbol tetapi tiada code.",
-            "symbol_lookup": symbol_list,
+
+            "message":
+                "iTick pulangkan symbol tetapi tiada code.",
+
+            "symbol_lookup":
+                symbol_list,
+
             "count": 0,
+
             "candles": []
         }
 
@@ -662,15 +876,20 @@ def test_do():
     # =====================================================
 
     kline_params = {
-        "region": "MY",
-        "exchange": actual_exchange or "",
-        "code": actual_code,
-        "kType": 8,
 
-        # Ambil lebih banyak candle supaya
-        # ATR(10) / Supertrend mempunyai
-        # data permulaan yang mencukupi.
-        "limit": 50
+        "region": "MY",
+
+        "exchange":
+            actual_exchange or "",
+
+        "code":
+            actual_code,
+
+        "kType":
+            8,
+
+        "limit":
+            50
     }
 
 
@@ -744,7 +963,10 @@ def test_do():
     # GET CANDLES
     # =====================================================
 
-    raw = kline_data.get("data", [])
+    raw = kline_data.get(
+        "data",
+        []
+    )
 
 
     if isinstance(raw, list):
@@ -761,6 +983,7 @@ def test_do():
         type(raw).__name__
     )
 
+
     print(
         "FINAL CANDLE COUNT:",
         len(candles)
@@ -768,17 +991,15 @@ def test_do():
 
 
     # =====================================================
-    # SORT CANDLES
-    #
-    # Supertrend mesti dikira dari candle lama
-    # kepada candle baru.
+    # SORT OLD -> NEW
     # =====================================================
 
     try:
 
         candles = sorted(
             candles,
-            key=lambda x: float(x.get("t", 0))
+            key=lambda x:
+                float(x.get("t", 0))
         )
 
     except Exception:
@@ -787,10 +1008,10 @@ def test_do():
 
 
     # =====================================================
-    # CALCULATE SUPERTREND
+    # CALCULATE SUPERTREND + SIGNAL
     # =====================================================
 
-    supertrend_data = calculate_supertrend(
+    calculated = calculate_supertrend(
         candles,
         ATR_LENGTH,
         SUPERTREND_FACTOR
@@ -798,81 +1019,61 @@ def test_do():
 
 
     # =====================================================
-    # LAST 15 RESULTS
+    # LATEST 15
     # =====================================================
 
-    latest_results = []
+    latest_15 = []
 
 
-    for candle in supertrend_data[-15:]:
+    for candle in calculated[-15:]:
 
-        latest_results.append({
+        latest_15.append(
+            format_result(candle)
+        )
 
-            "date": format_timestamp(
-                candle.get("t")
-            ),
 
-            "close": candle.get("c"),
+    # =====================================================
+    # FIND RECENT SIGNALS
+    # =====================================================
 
-            "high": candle.get("h"),
+    recent_signals = []
 
-            "low": candle.get("l"),
 
-            "atr10": (
-                round(candle["atr"], 6)
-                if candle.get("atr") is not None
-                else None
-            ),
+    for candle in calculated:
 
-            "supertrend": (
-                round(candle["supertrend"], 6)
-                if candle.get("supertrend") is not None
-                else None
-            ),
+        if candle.get(
+            "signal",
+            0
+        ) != 0:
 
-            "direction": candle.get(
-                "direction"
-            ),
-
-            "trend": candle.get(
-                "trend"
+            recent_signals.append(
+                format_result(candle)
             )
-        })
+
+
+    # Keep only latest 10 signals
+
+    recent_signals = recent_signals[-10:]
 
 
     # =====================================================
-    # LATEST SUPERTREND
+    # LATEST
     # =====================================================
 
     latest = (
-        supertrend_data[-1]
-        if supertrend_data
+        calculated[-1]
+        if calculated
         else None
     )
 
 
-    latest_supertrend = None
-    latest_direction = None
-    latest_trend = None
+    latest_result = None
 
 
-    if latest:
+    if latest is not None:
 
-        latest_supertrend = (
-            round(
-                latest["supertrend"],
-                6
-            )
-            if latest.get("supertrend") is not None
-            else None
-        )
-
-        latest_direction = latest.get(
-            "direction"
-        )
-
-        latest_trend = latest.get(
-            "trend"
+        latest_result = format_result(
+            latest
         )
 
 
@@ -884,42 +1085,50 @@ def test_do():
 
         "ok": bool(candles),
 
-        "stage": "supertrend_complete",
+        "stage":
+            "signal_complete",
 
-        "requested_symbol": "D&O",
+        "requested_symbol":
+            "D&O",
 
-        "symbol": actual_code,
+        "symbol":
+            actual_code,
 
-        "name": actual_name,
+        "name":
+            actual_name,
 
-        "region": "MY",
+        "region":
+            "MY",
 
-        "exchange": actual_exchange,
+        "exchange":
+            actual_exchange,
 
-        "timeframe": "1D",
+        "timeframe":
+            "1D",
 
-        "requested": 50,
+        "requested":
+            50,
 
-        "count": len(candles),
+        "count":
+            len(candles),
 
         "settings": {
 
-            "atr_length": ATR_LENGTH,
+            "atr_length":
+                ATR_LENGTH,
 
-            "factor": SUPERTREND_FACTOR
-
-        },
-
-        "latest": {
-
-            "supertrend": latest_supertrend,
-
-            "direction": latest_direction,
-
-            "trend": latest_trend
+            "factor":
+                SUPERTREND_FACTOR
 
         },
 
-        "latest_15": latest_results
+        "latest":
+            latest_result,
+
+        "recent_signals":
+            recent_signals,
+
+        "latest_15":
+            latest_15
 
     }
