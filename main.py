@@ -1095,59 +1095,46 @@ Ready.
 
 <script>
 
+<script>
+
 async function scanUniverse() {
 
     const out =
         document.getElementById("out");
 
     const button =
-        document.getElementById(
-            "scanButton"
-        );
+        document.getElementById("scanButton");
 
     const maxSignals =
         parseInt(
-            document.getElementById(
-                "maxSignals"
-            ).value
+            document.getElementById("maxSignals").value
         ) || 5;
-
 
     button.disabled = true;
 
-
     let start = 0;
-
     let totalSignals = 0;
-
     let allSignals = [];
-
     let allErrors = [];
-
     let scannedCount = 0;
-
     let done = false;
 
-
     out.textContent =
-        "MULA SCAN...\\n\\n";
-
+        "MULA SCAN...\n\n";
 
     try {
 
         while (
-            !done
-            &&
+            !done &&
             totalSignals < maxSignals
         ) {
 
             out.textContent +=
-                "--------------------------------\\n" +
-                "SCAN BATCH\\n" +
+                "--------------------------------\n" +
+                "SCAN BATCH\n" +
                 "Kaunter seterusnya: " +
                 start +
-                "\\n\\n";
-
+                "\n\n";
 
             const response =
                 await fetch(
@@ -1157,62 +1144,46 @@ async function scanUniverse() {
                     "&batch_size=5"
                 );
 
-
             if (!response.ok) {
 
                 throw new Error(
-                    "HTTP " +
-                    response.status
+                    "HTTP " + response.status
                 );
 
             }
 
-
             const data =
                 await response.json();
-
 
             scannedCount =
                 data.scanned_count;
 
-
             done =
                 data.done;
 
-
-            // ---------------------------------------------
-            // SIGNAL BATCH
-            // ---------------------------------------------
-
             if (
-                data.scanner
-                &&
+                data.scanner &&
                 data.scanner.length > 0
             ) {
 
                 for (
-                    const signal
-                    of data.scanner
+                    const signal of data.scanner
                 ) {
 
                     if (
-                        totalSignals
-                        >= maxSignals
+                        totalSignals >= maxSignals
                     ) {
                         break;
                     }
 
-                    allSignals.push(
-                        signal
-                    );
+                    allSignals.push(signal);
 
                     totalSignals++;
 
-
                     out.textContent +=
-                        "✅ SIGNAL #" +
+                        "SIGNAL #" +
                         totalSignals +
-                        "\\n" +
+                        "\n" +
                         signal.symbol +
                         " | " +
                         signal.date +
@@ -1220,96 +1191,70 @@ async function scanUniverse() {
                         signal.close +
                         " | " +
                         signal.signal_name +
-                        "\\n\\n";
+                        "\n\n";
                 }
 
             } else {
 
                 out.textContent +=
-                    "Tiada signal dalam batch ini.\\n\\n";
+                    "Tiada signal dalam batch ini.\n\n";
             }
 
-
-            // ---------------------------------------------
-            // ERRORS
-            // ---------------------------------------------
-
             if (
-                data.errors
-                &&
+                data.errors &&
                 data.errors.length > 0
             ) {
 
                 for (
-                    const error
-                    of data.errors
+                    const error of data.errors
                 ) {
 
-                    allErrors.push(
-                        error
-                    );
-
+                    allErrors.push(error);
                 }
 
                 out.textContent +=
-                    "⚠️ Error batch: " +
+                    "Error batch: " +
                     data.errors.length +
-                    "\\n";
+                    "\n";
             }
 
-
             out.textContent +=
-                "\\nProgress: " +
+                "Progress: " +
                 scannedCount +
                 " / " +
                 data.requested_count +
-                "\\n" +
+                "\n" +
                 "Signal: " +
                 totalSignals +
                 " / " +
                 maxSignals +
-                "\\n\\n";
-
-
-            // ---------------------------------------------
-            // NEXT BATCH
-            // ---------------------------------------------
+                "\n\n";
 
             start =
                 data.end;
 
-
             if (
-                !done
-                &&
+                !done &&
                 totalSignals < maxSignals
             ) {
 
                 out.textContent +=
-                    "Tunggu sekejap sebelum batch seterusnya...\\n\\n";
+                    "Tunggu sekejap sebelum batch seterusnya...\n\n";
 
                 await sleep(1500);
-
             }
-
         }
 
-
-        // =================================================
-        // FINAL RESULT
-        // =================================================
-
         out.textContent +=
-            "\\n================================\\n" +
-            "SCAN SELESAI\\n" +
-            "================================\\n\\n" +
+            "\n================================\n" +
+            "SCAN SELESAI\n" +
+            "================================\n\n" +
             "Jumlah kaunter discan: " +
             scannedCount +
-            "\\n" +
+            "\n" +
             "Signal ditemui: " +
             totalSignals +
-            "\\n";
-
+            "\n";
 
         if (
             totalSignals >= maxSignals
@@ -1318,16 +1263,15 @@ async function scanUniverse() {
             out.textContent +=
                 "Status: CUKUP " +
                 maxSignals +
-                " SIGNAL — STOP\\n";
+                " SIGNAL - STOP\n";
 
         } else if (done) {
-        out.textContent +=
-            "Status: SEMUA UNIVERSE SELESAI\n";
 
+            out.textContent +=
+                "Status: SEMUA UNIVERSE SELESAI\n";
         }
 
-        out.textContent +=
-            "\n";
+        out.textContent += "\n";
 
         if (
             allSignals.length > 0
@@ -1350,7 +1294,6 @@ async function scanUniverse() {
                         " | " +
                         signal.signal_name +
                         "\n";
-
                 }
             );
 
@@ -1358,7 +1301,6 @@ async function scanUniverse() {
 
             out.textContent +=
                 "Tiada signal ditemui.\n";
-
         }
 
         if (
@@ -1373,13 +1315,11 @@ async function scanUniverse() {
 
                     out.textContent +=
                         error.symbol +
-                        " → " +
+                        " -> " +
                         error.error +
                         "\n";
-
                 }
             );
-
         }
 
     } catch (error) {
@@ -1387,11 +1327,9 @@ async function scanUniverse() {
         out.textContent +=
             "\nSCAN ERROR\n\n" +
             error;
-
     }
 
     button.disabled = false;
-
 }
 
 
@@ -1399,21 +1337,15 @@ function sleep(ms) {
 
     return new Promise(
         resolve =>
-            setTimeout(
-                resolve,
-                ms
-            )
+            setTimeout(resolve, ms)
     );
-
 }
 
 
 async function testHistory() {
 
     const out =
-        document.getElementById(
-            "out"
-        );
+        document.getElementById("out");
 
     out.textContent =
         "Testing historical signals...";
@@ -1431,7 +1363,6 @@ async function testHistory() {
                 "HTTP " +
                 response.status
             );
-
         }
 
         const data =
@@ -1449,9 +1380,7 @@ async function testHistory() {
         out.textContent =
             "HISTORY ERROR\n\n" +
             error;
-
     }
-
 }
 
 </script>
