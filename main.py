@@ -1,5 +1,6 @@
 import os
 import requests
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -19,11 +20,20 @@ ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 
 
 # =========================================================
+# SUPERTREND SETTINGS
+# =========================================================
+
+ATR_LENGTH = 10
+SUPERTREND_FACTOR = 1.0
+
+
+# =========================================================
 # HOME PAGE
 # =========================================================
 
 @app.get("/", response_class=HTMLResponse)
 def home():
+
     return """
     <!doctype html>
 
@@ -81,6 +91,7 @@ def home():
             border-radius: 10px;
             margin-top: 14px;
             overflow-wrap: break-word;
+            font-size: 12px;
         }
 
         </style>
@@ -95,11 +106,11 @@ def home():
             <h1>BURSA SUPERTREND SCANNER</h1>
 
             <p class="muted">
-                D&O iTick connection test • Daily • ATR 10 / Factor 1.0
+                D&O Supertrend test • Daily • ATR 10 / Factor 1.0
             </p>
 
             <button onclick="testDO()">
-                TEST D&O SEKARANG
+                TEST D&O SUPERTREND
             </button>
 
             <pre id="out">Belum diuji.</pre>
@@ -115,7 +126,7 @@ def home():
                 document.getElementById("out");
 
             out.textContent =
-                "Sedang menghubungi iTick...";
+                "Sedang mengambil data D&O dan mengira Supertrend...";
 
 
             try {
@@ -157,6 +168,320 @@ def health():
         "ok": True,
         "service": "bursa-supertrend-scanner"
     }
+
+
+# =========================================================
+# TRUE RANGE
+# =========================================================
+
+def true_range(high, low, previous_close):
+
+    if previous_close is None:
+        return high - low
+
+    return max(
+        high - low,
+        abs(high - previous_close),
+        abs(low - previous_close)
+    )
+
+
+# =========================================================
+# RMA / WILDER ATR
+# =========================================================
+
+def calculate_atr(candles, length):
+
+    tr_values = []
+
+    for i, candle in enumerate(candles):
+
+        high = float(candle["h"])
+        low = float(candle["l"])
+
+        if i == 0:
+
+            previous_close = None
+
+        else:
+
+            previous_close = float(candles[i - 1]["c"])
+
+
+        tr = true_range(
+            high,
+            low,
+            previous_close
+        )
+
+        tr_values.append(tr)
+
+
+    atr_values = [None] * len(candles)
+
+
+    if len(tr_values) < length:
+
+        return atr_values
+
+
+    # -----------------------------------------------------
+    # INITIAL RMA = SMA OF FIRST LENGTH TRUE RANGES
+    # -----------------------------------------------------
+
+    first_atr = sum(
+        tr_values[:length]
+    ) / length
+
+    atr_values[length - 1] = first_atr
+
+
+    # -----------------------------------------------------
+    # WILDER RMA
+    # -----------------------------------------------------
+
+    previous_atr = first_atr
+
+    for i in range(length, len(tr_values)):
+
+        current_atr = (
+            (
+                previous_atr * (length - 1)
+            )
+            + tr_values[i]
+        ) / length
+
+        atr_values[i] = current_atr
+
+        previous_atr = current_atr
+
+
+    return atr_values
+
+
+# =========================================================
+# SUPERTREND
+# =========================================================
+
+def calculate_supertrend(candles, atr_length, factor):
+
+    atr_values = calculate_atr(
+        candles,
+        atr_length
+    )
+
+
+    results = []
+
+
+    previous_final_upper = None
+    previous_final_lower = None
+    previous_direction = None
+    previous_close = None
+
+
+    for i, candle in enumerate(candles):
+
+        high = float(candle["h"])
+        low = float(candle["l"])
+        close = float(candle["c"])
+
+
+        atr = atr_values[i]
+
+
+        result = dict(candle)
+
+        result["atr"] = atr
+
+
+        # -------------------------------------------------
+        # NOT ENOUGH DATA FOR ATR
+        # -------------------------------------------------
+
+        if atr is None:
+
+            result["basic_upper"] = None
+            result["basic_lower"] = None
+            result["final_upper"] = None
+            result["final_lower"] = None
+            result["supertrend"] = None
+            result["direction"] = None
+
+            results.append(result)
+
+            previous_close = close
+
+            continue
+
+
+        hl2 = (high + low) / 2.0
+
+
+        basic_upper = (
+            hl2 + factor * atr
+        )
+
+        basic_lower = (
+            hl2 - factor * atr
+        )
+
+
+        # -------------------------------------------------
+        # FINAL UPPER BAND
+        # -------------------------------------------------
+
+        if previous_final_upper is None:
+
+            final_upper = basic_upper
+
+        else:
+
+            if (
+                basic_upper < previous_final_upper
+                or (
+                    previous_close is not None
+                    and previous_close > previous_final_upper
+                )
+            ):
+
+                final_upper = basic_upper
+
+            else:
+
+                final_upper = previous_final_upper
+
+
+        # -------------------------------------------------
+        # FINAL LOWER BAND
+        # -------------------------------------------------
+
+        if previous_final_lower is None:
+
+            final_lower = basic_lower
+
+        else:
+
+            if (
+                basic_lower > previous_final_lower
+                or (
+                    previous_close is not None
+                    and previous_close < previous_final_lower
+                )
+            ):
+
+                final_lower = basic_lower
+
+            else:
+
+                final_lower = previous_final_lower
+
+
+        # -------------------------------------------------
+        # DIRECTION
+        #
+        # TradingView convention:
+        # -1 = BULL
+        #  1 = BEAR
+        # -------------------------------------------------
+
+        if previous_direction is None:
+
+            if close <= final_upper:
+
+                direction = 1
+
+            else:
+
+                direction = -1
+
+
+        elif previous_direction == 1:
+
+            if close > final_upper:
+
+                direction = -1
+
+            else:
+
+                direction = 1
+
+
+        else:
+
+            if close < final_lower:
+
+                direction = 1
+
+            else:
+
+                direction = -1
+
+
+        # -------------------------------------------------
+        # SUPERTREND VALUE
+        # -------------------------------------------------
+
+        if direction < 0:
+
+            supertrend = final_lower
+
+        else:
+
+            supertrend = final_upper
+
+
+        # -------------------------------------------------
+        # SAVE RESULT
+        # -------------------------------------------------
+
+        result["basic_upper"] = basic_upper
+        result["basic_lower"] = basic_lower
+        result["final_upper"] = final_upper
+        result["final_lower"] = final_lower
+        result["supertrend"] = supertrend
+        result["direction"] = direction
+
+
+        if direction < 0:
+
+            result["trend"] = "BULL"
+
+        else:
+
+            result["trend"] = "BEAR"
+
+
+        results.append(result)
+
+
+        previous_final_upper = final_upper
+        previous_final_lower = final_lower
+        previous_direction = direction
+        previous_close = close
+
+
+    return results
+
+
+# =========================================================
+# FORMAT DATE
+# =========================================================
+
+def format_timestamp(timestamp):
+
+    try:
+
+        dt = datetime.fromtimestamp(
+            float(timestamp) / 1000,
+            tz=timezone.utc
+        )
+
+        return dt.strftime("%Y-%m-%d")
+
+    except Exception:
+
+        return str(timestamp)
 
 
 # =========================================================
@@ -341,7 +666,11 @@ def test_do():
         "exchange": actual_exchange or "",
         "code": actual_code,
         "kType": 8,
-        "limit": 10
+
+        # Ambil lebih banyak candle supaya
+        # ATR(10) / Supertrend mempunyai
+        # data permulaan yang mencukupi.
+        "limit": 50
     }
 
 
@@ -439,20 +768,158 @@ def test_do():
 
 
     # =====================================================
+    # SORT CANDLES
+    #
+    # Supertrend mesti dikira dari candle lama
+    # kepada candle baru.
+    # =====================================================
+
+    try:
+
+        candles = sorted(
+            candles,
+            key=lambda x: float(x.get("t", 0))
+        )
+
+    except Exception:
+
+        pass
+
+
+    # =====================================================
+    # CALCULATE SUPERTREND
+    # =====================================================
+
+    supertrend_data = calculate_supertrend(
+        candles,
+        ATR_LENGTH,
+        SUPERTREND_FACTOR
+    )
+
+
+    # =====================================================
+    # LAST 15 RESULTS
+    # =====================================================
+
+    latest_results = []
+
+
+    for candle in supertrend_data[-15:]:
+
+        latest_results.append({
+
+            "date": format_timestamp(
+                candle.get("t")
+            ),
+
+            "close": candle.get("c"),
+
+            "high": candle.get("h"),
+
+            "low": candle.get("l"),
+
+            "atr10": (
+                round(candle["atr"], 6)
+                if candle.get("atr") is not None
+                else None
+            ),
+
+            "supertrend": (
+                round(candle["supertrend"], 6)
+                if candle.get("supertrend") is not None
+                else None
+            ),
+
+            "direction": candle.get(
+                "direction"
+            ),
+
+            "trend": candle.get(
+                "trend"
+            )
+        })
+
+
+    # =====================================================
+    # LATEST SUPERTREND
+    # =====================================================
+
+    latest = (
+        supertrend_data[-1]
+        if supertrend_data
+        else None
+    )
+
+
+    latest_supertrend = None
+    latest_direction = None
+    latest_trend = None
+
+
+    if latest:
+
+        latest_supertrend = (
+            round(
+                latest["supertrend"],
+                6
+            )
+            if latest.get("supertrend") is not None
+            else None
+        )
+
+        latest_direction = latest.get(
+            "direction"
+        )
+
+        latest_trend = latest.get(
+            "trend"
+        )
+
+
+    # =====================================================
     # FINAL RESPONSE
     # =====================================================
 
     return {
+
         "ok": bool(candles),
-        "stage": "complete",
+
+        "stage": "supertrend_complete",
+
         "requested_symbol": "D&O",
+
         "symbol": actual_code,
+
         "name": actual_name,
+
         "region": "MY",
+
         "exchange": actual_exchange,
+
         "timeframe": "1D",
-        "requested": 10,
-        "symbol_lookup": symbol_list,
+
+        "requested": 50,
+
         "count": len(candles),
-        "candles": candles
+
+        "settings": {
+
+            "atr_length": ATR_LENGTH,
+
+            "factor": SUPERTREND_FACTOR
+
+        },
+
+        "latest": {
+
+            "supertrend": latest_supertrend,
+
+            "direction": latest_direction,
+
+            "trend": latest_trend
+
+        },
+
+        "latest_15": latest_results
+
     }
