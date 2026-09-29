@@ -5,7 +5,7 @@ import requests
 
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 
@@ -24,9 +24,15 @@ ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 
+ITICK_REQUEST_DELAY = float(
+    os.getenv("ITICK_REQUEST_DELAY", "1.0")
+)
+
+ITICK_MAX_RETRIES = 2
+
 
 # ============================================================
-# SUPERTREND SETTINGS
+# SUPERTREND
 # ============================================================
 
 ATR_LENGTH = 10
@@ -34,19 +40,11 @@ SUPERTREND_FACTOR = 1.0
 
 
 # ============================================================
-# SCANNER SETTINGS
+# BATCH SETTINGS
 # ============================================================
 
+DEFAULT_BATCH_SIZE = 5
 DEFAULT_MAX_SIGNALS = 5
-
-# Jarak minimum antara request iTick
-# Boleh dinaikkan jika masih banyak HTTP 429.
-ITICK_REQUEST_DELAY = float(
-    os.getenv("ITICK_REQUEST_DELAY", "1.0")
-)
-
-# Maksimum retry apabila HTTP 429
-ITICK_MAX_RETRIES = 2
 
 
 # ============================================================
@@ -58,9 +56,6 @@ _last_itick_request = 0.0
 
 
 def wait_before_itick_request():
-    """
-    Pastikan request ke iTick tidak dihantar terlalu rapat.
-    """
 
     global _last_itick_request
 
@@ -68,8 +63,9 @@ def wait_before_itick_request():
 
         now = time.monotonic()
 
-        wait_time = ITICK_REQUEST_DELAY - (
-            now - _last_itick_request
+        wait_time = (
+            ITICK_REQUEST_DELAY
+            - (now - _last_itick_request)
         )
 
         if wait_time > 0:
@@ -92,7 +88,7 @@ TEST_SYMBOLS = [
 
 
 # ============================================================
-# BURSA UNIVERSE
+# BURSA UNIVERSE - 36
 # ============================================================
 
 BURSA_UNIVERSE = [
@@ -136,7 +132,7 @@ BURSA_UNIVERSE = [
 
 
 # ============================================================
-# TIME FORMAT
+# DATE FORMAT
 # ============================================================
 
 def format_timestamp(timestamp):
@@ -165,7 +161,11 @@ def format_timestamp(timestamp):
 # TRUE RANGE
 # ============================================================
 
-def true_range(high, low, previous_close):
+def true_range(
+    high,
+    low,
+    previous_close
+):
 
     if previous_close is None:
 
@@ -179,7 +179,7 @@ def true_range(high, low, previous_close):
 
 
 # ============================================================
-# SUPERTREND CALCULATION
+# SUPERTREND
 # ============================================================
 
 def calculate_supertrend(
@@ -197,23 +197,14 @@ def calculate_supertrend(
 
         try:
 
-            timestamp = float(candle.get("t", 0))
-
-            open_price = float(candle.get("o", 0))
-            high = float(candle.get("h", 0))
-            low = float(candle.get("l", 0))
-            close = float(candle.get("c", 0))
-
-            volume = candle.get("v", 0)
-
             parsed.append(
                 {
-                    "t": timestamp,
-                    "o": open_price,
-                    "h": high,
-                    "l": low,
-                    "c": close,
-                    "v": volume
+                    "t": float(candle.get("t", 0)),
+                    "o": float(candle.get("o", 0)),
+                    "h": float(candle.get("h", 0)),
+                    "l": float(candle.get("l", 0)),
+                    "c": float(candle.get("c", 0)),
+                    "v": candle.get("v", 0)
                 }
             )
 
@@ -238,44 +229,41 @@ def calculate_supertrend(
         if i > 0:
             previous_close = parsed[i - 1]["c"]
 
-        tr = true_range(
-            candle["h"],
-            candle["l"],
-            previous_close
+        trs.append(
+            true_range(
+                candle["h"],
+                candle["l"],
+                previous_close
+            )
         )
 
-        trs.append(tr)
-
     # --------------------------------------------------------
-    # WILDER ATR / RMA
+    # WILDER ATR
     # --------------------------------------------------------
 
     atr_values = [None] * len(parsed)
 
-    if len(trs) >= atr_length:
+    first_atr = (
+        sum(trs[:atr_length])
+        / atr_length
+    )
 
-        first_atr = sum(
-            trs[:atr_length]
+    atr_values[atr_length - 1] = first_atr
+
+    for i in range(
+        atr_length,
+        len(trs)
+    ):
+
+        previous_atr = atr_values[i - 1]
+
+        atr_values[i] = (
+            (
+                previous_atr
+                * (atr_length - 1)
+            )
+            + trs[i]
         ) / atr_length
-
-        atr_values[atr_length - 1] = first_atr
-
-        for i in range(
-            atr_length,
-            len(trs)
-        ):
-
-            previous_atr = atr_values[i - 1]
-
-            current_tr = trs[i]
-
-            atr_values[i] = (
-                (
-                    previous_atr
-                    * (atr_length - 1)
-                )
-                + current_tr
-            ) / atr_length
 
     # --------------------------------------------------------
     # SUPERTREND
@@ -366,11 +354,8 @@ def calculate_supertrend(
         if previous_direction is None:
 
             if candle["c"] <= final_upper:
-
                 direction = 1
-
             else:
-
                 direction = -1
 
         else:
@@ -378,21 +363,15 @@ def calculate_supertrend(
             if previous_direction == 1:
 
                 if candle["c"] > final_upper:
-
                     direction = -1
-
                 else:
-
                     direction = 1
 
             else:
 
                 if candle["c"] < final_lower:
-
                     direction = 1
-
                 else:
-
                     direction = -1
 
         # ----------------------------------------------------
@@ -400,11 +379,8 @@ def calculate_supertrend(
         # ----------------------------------------------------
 
         if direction < 0:
-
             supertrend = final_lower
-
         else:
-
             supertrend = final_upper
 
         # ----------------------------------------------------
@@ -440,11 +416,6 @@ def calculate_supertrend(
 
         # ----------------------------------------------------
         # SIGNAL
-        #
-        # 0 = NONE
-        # 1 = FLIP
-        # 2 = HIGH BREAK
-        # 3 = FLIP + HIGH BREAK
         # ----------------------------------------------------
 
         if flip and high_break:
@@ -494,53 +465,37 @@ def format_result(candle):
     direction = candle.get("direction")
 
     if direction == -1:
-
         trend = "BULL"
 
     elif direction == 1:
-
         trend = "BEAR"
 
     else:
-
         trend = "NA"
 
     return {
         "date": format_timestamp(
             candle.get("t", 0)
         ),
-
         "close": candle.get("c"),
-
         "high": candle.get("h"),
-
         "low": candle.get("l"),
-
         "atr10": candle.get("atr"),
-
-        "supertrend": candle.get(
-            "supertrend"
-        ),
-
+        "supertrend": candle.get("supertrend"),
         "direction": direction,
-
         "trend": trend,
-
         "flip": candle.get(
             "flip",
             False
         ),
-
         "high_break": candle.get(
             "high_break",
             False
         ),
-
         "signal": candle.get(
             "signal",
             0
         ),
-
         "signal_name": candle.get(
             "signal_name",
             "NONE"
@@ -549,7 +504,7 @@ def format_result(candle):
 
 
 # ============================================================
-# FETCH ITICK DAILY K-LINE
+# FETCH KLINE
 # ============================================================
 
 def fetch_kline(
@@ -562,7 +517,8 @@ def fetch_kline(
         return {
             "ok": False,
             "symbol": symbol,
-            "error": "ITICK_API_KEY belum diset."
+            "error":
+                "ITICK_API_KEY belum diset."
         }
 
     headers = {
@@ -598,14 +554,12 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": (
-                    "K-line request error: "
-                    f"{error}"
-                )
+                "error":
+                    f"K-line request error: {error}"
             }
 
         # ----------------------------------------------------
-        # RATE LIMIT
+        # 429
         # ----------------------------------------------------
 
         if response.status_code == 429:
@@ -615,9 +569,8 @@ def fetch_kline(
                 return {
                     "ok": False,
                     "symbol": symbol,
-                    "error": (
+                    "error":
                         "HTTP 429 selepas retry."
-                    )
                 }
 
             retry_after = response.headers.get(
@@ -627,13 +580,10 @@ def fetch_kline(
             if retry_after:
 
                 try:
-
                     sleep_seconds = float(
                         retry_after
                     )
-
                 except Exception:
-
                     sleep_seconds = (
                         2.0
                         * (2 ** attempt)
@@ -658,7 +608,7 @@ def fetch_kline(
             continue
 
         # ----------------------------------------------------
-        # NON-429 HTTP ERROR
+        # OTHER HTTP ERROR
         # ----------------------------------------------------
 
         if response.status_code != 200:
@@ -666,14 +616,9 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": (
+                "error":
                     f"HTTP {response.status_code}"
-                )
             }
-
-        # ----------------------------------------------------
-        # JSON
-        # ----------------------------------------------------
 
         try:
 
@@ -684,22 +629,17 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": (
-                    "K-line response "
-                    "bukan JSON."
-                )
+                "error":
+                    "K-line response bukan JSON."
             }
-
-        # ----------------------------------------------------
-        # ITICK API ERROR
-        # ----------------------------------------------------
 
         if data.get("code") != 0:
 
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": str(data)
+                "error":
+                    str(data)
             }
 
         raw = data.get(
@@ -707,10 +647,7 @@ def fetch_kline(
             []
         )
 
-        if not isinstance(
-            raw,
-            list
-        ):
+        if not isinstance(raw, list):
 
             raw = []
 
@@ -719,22 +656,16 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error": (
+                "error":
                     "Tiada daily candle."
-                )
             }
-
-        # ----------------------------------------------------
-        # SORT OLD → NEW
-        # ----------------------------------------------------
 
         try:
 
             raw = sorted(
                 raw,
-                key=lambda x: float(
-                    x.get("t", 0)
-                )
+                key=lambda x:
+                    float(x.get("t", 0))
             )
 
         except Exception:
@@ -750,7 +681,8 @@ def fetch_kline(
     return {
         "ok": False,
         "symbol": symbol,
-        "error": "K-line request gagal."
+        "error":
+            "K-line request gagal."
     }
 
 
@@ -769,10 +701,8 @@ def calculate_symbol(symbol):
 
         return fetched
 
-    candles = fetched["candles"]
-
     calculated = calculate_supertrend(
-        candles,
+        fetched["candles"],
         ATR_LENGTH,
         SUPERTREND_FACTOR
     )
@@ -782,9 +712,8 @@ def calculate_symbol(symbol):
         return {
             "ok": False,
             "symbol": symbol,
-            "error": (
+            "error":
                 "Supertrend calculation gagal."
-            )
         }
 
     latest = calculated[-1]
@@ -805,9 +734,8 @@ def calculate_symbol(symbol):
     return {
         "ok": True,
         "symbol": symbol,
-        "latest": format_result(
-            latest
-        ),
+        "latest":
+            format_result(latest),
         "historical_signals":
             historical_signals
     }
@@ -828,110 +756,55 @@ def health():
 
 
 # ============================================================
-# TEST 5 SYMBOLS
-# ============================================================
-
-@app.get("/api/test/5")
-def test_five():
-
-    results = []
-
-    for symbol in TEST_SYMBOLS:
-
-        result = calculate_symbol(
-            symbol
-        )
-
-        results.append(result)
-
-    return {
-        "requested_count":
-            len(TEST_SYMBOLS),
-
-        "results":
-            results
-    }
-
-
-# ============================================================
-# BURSA UNIVERSE SCANNER
+# BATCH UNIVERSE SCAN
 #
-# IMPORTANT:
-# Scan satu demi satu.
-#
-# Bila jumpa signal:
-#   terus masukkan ke scanner.
-#
-# Bila cukup max_signals:
-#   STOP.
-#
-# Tidak perlu scan baki universe.
+# start = kedudukan mula
+# batch_size = berapa kaunter satu batch
 # ============================================================
 
 @app.get("/api/test/universe")
 def test_universe(
-    max_signals: int = DEFAULT_MAX_SIGNALS
+    start: int = 0,
+    batch_size: int = DEFAULT_BATCH_SIZE
 ):
 
-    # --------------------------------------------------------
-    # VALIDATE
-    # --------------------------------------------------------
+    if start < 0:
+        start = 0
 
-    if max_signals < 1:
+    if batch_size < 1:
+        batch_size = 1
 
-        max_signals = 1
+    if batch_size > 10:
+        batch_size = 10
 
-    if max_signals > len(
-        BURSA_UNIVERSE
-    ):
+    end = min(
+        start + batch_size,
+        len(BURSA_UNIVERSE)
+    )
 
-        max_signals = len(
-            BURSA_UNIVERSE
-        )
+    symbols = BURSA_UNIVERSE[
+        start:end
+    ]
 
     scanner = []
-
     errors = []
 
-    scanned_count = 0
-
-    stopped_early = False
-
-    # --------------------------------------------------------
-    # SCAN SEQUENTIAL
-    # --------------------------------------------------------
-
-    for symbol in BURSA_UNIVERSE:
-
-        # ----------------------------------------------------
-        # STOP BILA SUDAH CUKUP SIGNAL
-        # ----------------------------------------------------
-
-        if len(scanner) >= max_signals:
-
-            stopped_early = True
-
-            break
-
-        scanned_count += 1
+    for symbol in symbols:
 
         result = calculate_symbol(
             symbol
         )
-
-        # ----------------------------------------------------
-        # ERROR
-        # ----------------------------------------------------
 
         if not result.get("ok"):
 
             errors.append(
                 {
                     "symbol": symbol,
-                    "error": result.get(
-                        "error",
-                        "Unknown error"
-                    )
+                    "error":
+                        result.get(
+                            "error",
+                            "Unknown error"
+                        )
                 }
             )
 
@@ -941,13 +814,6 @@ def test_universe(
             "latest",
             {}
         )
-
-        # ----------------------------------------------------
-        # SIGNAL SAH
-        #
-        # Kita gunakan signal 1, 2 atau 3.
-        # NONE = 0 tidak masuk scanner.
-        # ----------------------------------------------------
 
         signal = latest.get(
             "signal",
@@ -963,68 +829,58 @@ def test_universe(
                 }
             )
 
-        # ----------------------------------------------------
-        # STOP SEBAIK SAHAJA CUKUP
-        # ----------------------------------------------------
+    next_start = end
 
-        if len(scanner) >= max_signals:
-
-            stopped_early = True
-
-            break
-
-    # --------------------------------------------------------
-    # SIGNAL ONLY
-    # --------------------------------------------------------
-
-    signals_only = scanner.copy()
-
-    # --------------------------------------------------------
-    # RESPONSE
-    # --------------------------------------------------------
+    done = (
+        next_start
+        >= len(BURSA_UNIVERSE)
+    )
 
     return {
+        "start": start,
+        "end": end,
+        "batch_size": len(symbols),
         "requested_count":
             len(BURSA_UNIVERSE),
-
         "scanned_count":
-            scanned_count,
-
-        "max_signals":
-            max_signals,
-
-        "successful_signal_count":
-            len(scanner),
-
-        "scanner":
-            scanner,
-
+            end,
+        "remaining_count":
+            len(BURSA_UNIVERSE) - end,
+        "done": done,
+        "scanner": scanner,
         "signals_only":
-            signals_only,
-
+            scanner.copy(),
         "error_count":
             len(errors),
-
-        "errors":
-            errors,
-
-        "stopped_early":
-            stopped_early,
-
-        "message":
-            (
-                f"Scan berhenti selepas "
-                f"{len(scanner)} signal "
-                f"ditemui."
-                if stopped_early
-                else
-                "Universe selesai discan."
-            )
+        "errors": errors
     }
 
 
 # ============================================================
-# HISTORICAL TEST
+# TEST 5
+# ============================================================
+
+@app.get("/api/test/5")
+def test_five():
+
+    results = []
+
+    for symbol in TEST_SYMBOLS:
+
+        results.append(
+            calculate_symbol(symbol)
+        )
+
+    return {
+        "requested_count":
+            len(TEST_SYMBOLS),
+        "results":
+            results
+    }
+
+
+# ============================================================
+# HISTORICAL
 # ============================================================
 
 @app.get("/api/test/history")
@@ -1123,8 +979,8 @@ button {
     font-weight: bold;
 }
 
-button:active {
-    transform: scale(0.99);
+button:disabled {
+    opacity: 0.5;
 }
 
 input {
@@ -1166,6 +1022,17 @@ pre {
     font-size: 13px;
 }
 
+.signal {
+    margin-top: 8px;
+    padding: 10px;
+    background: #163b25;
+    border-radius: 6px;
+}
+
+.error {
+    color: #ff7777;
+}
+
 </style>
 
 </head>
@@ -1192,26 +1059,30 @@ MAX SIGNALS
     id="maxSignals"
     type="number"
     min="1"
-    max="36"
+    max="20"
     value="5"
 >
 
 
-<button onclick="scanUniverse()">
+<button
+    id="scanButton"
+    onclick="scanUniverse()"
+>
 SCAN BURSA UNIVERSE
 </button>
 
 
-<button onclick="testHistory()">
+<button
+    onclick="testHistory()"
+>
 TEST HISTORICAL SIGNAL
 </button>
 
 
 <div class="info">
-Scanner akan scan kaunter satu demi satu.
-Bila cukup jumlah signal yang dipilih,
-scanner akan berhenti dan tidak meneruskan
-request kepada baki kaunter.
+Scanner akan scan 5 kaunter setiap batch.
+Keputusan setiap batch akan dipaparkan dahulu
+sebelum scanner sambung ke batch berikutnya.
 </div>
 
 
@@ -1229,89 +1100,226 @@ async function scanUniverse() {
     const out =
         document.getElementById("out");
 
-    const maxSignals =
+    const button =
         document.getElementById(
-            "maxSignals"
-        ).value;
+            "scanButton"
+        );
+
+    const maxSignals =
+        parseInt(
+            document.getElementById(
+                "maxSignals"
+            ).value
+        ) || 5;
+
+
+    button.disabled = true;
+
+
+    let start = 0;
+
+    let totalSignals = 0;
+
+    let allSignals = [];
+
+    let allErrors = [];
+
+    let scannedCount = 0;
+
+    let done = false;
+
 
     out.textContent =
-        "Scanning Bursa Universe...\\n" +
-        "Max Signals = " +
-        maxSignals +
-        "\\n\\n" +
-        "Sila tunggu...";
+        "MULA SCAN...\\n\\n";
 
 
     try {
 
-        const response =
-            await fetch(
-                "/api/test/universe?max_signals="
-                + encodeURIComponent(
-                    maxSignals
-                )
-            );
+        while (
+            !done
+            &&
+            totalSignals < maxSignals
+        ) {
 
-        const data =
-            await response.json();
-
-        out.textContent =
-            JSON.stringify(
-                data,
-                null,
-                2
-            );
-
-    } catch (error) {
-
-        out.textContent =
-            "SCAN ERROR\\n\\n" +
-            error;
-
-    }
-
-}
+            out.textContent +=
+                "--------------------------------\\n" +
+                "SCAN BATCH\\n" +
+                "Kaunter seterusnya: " +
+                start +
+                "\\n\\n";
 
 
-async function testHistory() {
+            const response =
+                await fetch(
+                    "/api/test/universe" +
+                    "?start=" +
+                    start +
+                    "&batch_size=5"
+                );
 
-    const out =
-        document.getElementById("out");
 
-    out.textContent =
-        "Testing historical signals...";
+            if (!response.ok) {
+
+                throw new Error(
+                    "HTTP " +
+                    response.status
+                );
+
+            }
 
 
-    try {
+            const data =
+                await response.json();
 
-        const response =
-            await fetch(
-                "/api/test/history"
-            );
 
-        const data =
-            await response.json();
+            scannedCount =
+                data.scanned_count;
 
-        out.textContent =
-            JSON.stringify(
-                data,
-                null,
-                2
-            );
 
-    } catch (error) {
+            done =
+                data.done;
 
-        out.textContent =
-            "HISTORY ERROR\\n\\n" +
-            error;
 
-    }
+            // ---------------------------------------------
+            // SIGNAL BATCH
+            // ---------------------------------------------
 
-}
+            if (
+                data.scanner
+                &&
+                data.scanner.length > 0
+            ) {
 
-</script>
+                for (
+                    const signal
+                    of data.scanner
+                ) {
 
-</body>
+                    if (
+                        totalSignals
+                        >= maxSignals
+                    ) {
+                        break;
+                    }
 
-</html>
-"""
+                    allSignals.push(
+                        signal
+                    );
+
+                    totalSignals++;
+
+
+                    out.textContent +=
+                        "✅ SIGNAL #" +
+                        totalSignals +
+                        "\\n" +
+                        signal.symbol +
+                        " | " +
+                        signal.date +
+                        " | RM " +
+                        signal.close +
+                        " | " +
+                        signal.signal_name +
+                        "\\n\\n";
+                }
+
+            } else {
+
+                out.textContent +=
+                    "Tiada signal dalam batch ini.\\n\\n";
+            }
+
+
+            // ---------------------------------------------
+            // ERRORS
+            // ---------------------------------------------
+
+            if (
+                data.errors
+                &&
+                data.errors.length > 0
+            ) {
+
+                for (
+                    const error
+                    of data.errors
+                ) {
+
+                    allErrors.push(
+                        error
+                    );
+
+                }
+
+                out.textContent +=
+                    "⚠️ Error batch: " +
+                    data.errors.length +
+                    "\\n";
+            }
+
+
+            out.textContent +=
+                "\\nProgress: " +
+                scannedCount +
+                " / " +
+                data.requested_count +
+                "\\n" +
+                "Signal: " +
+                totalSignals +
+                " / " +
+                maxSignals +
+                "\\n\\n";
+
+
+            // ---------------------------------------------
+            // NEXT BATCH
+            // ---------------------------------------------
+
+            start =
+                data.end;
+
+
+            if (
+                !done
+                &&
+                totalSignals < maxSignals
+            ) {
+
+                out.textContent +=
+                    "Tunggu sekejap sebelum batch seterusnya...\\n\\n";
+
+                await sleep(1500);
+
+            }
+
+        }
+
+
+        // =================================================
+        // FINAL RESULT
+        // =================================================
+
+        out.textContent +=
+            "\\n================================\\n" +
+            "SCAN SELESAI\\n" +
+            "================================\\n\\n" +
+            "Jumlah kaunter discan: " +
+            scannedCount +
+            "\\n" +
+            "Signal ditemui: " +
+            totalSignals +
+            "\\n";
+
+
+        if (
+            totalSignals >= maxSignals
+        ) {
+
+            out.textContent +=
+                "Status: CUKUP " +
+                maxSignals +
+                " SIGNAL — STOP\\n";
+
+        } else if (done) {
+
+           
