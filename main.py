@@ -927,7 +927,7 @@ def test_history():
 )
 def home():
 
-    return """
+    return '''
 <!DOCTYPE html>
 
 <html>
@@ -1321,5 +1321,143 @@ async function scanUniverse() {
                 " SIGNAL — STOP\\n";
 
         } else if (done) {
+        out.textContent +=
+            "Status: SEMUA UNIVERSE SELESAI\n";
 
+        }
+
+        out.textContent +=
+            "\n";
+
+        if (
+            allSignals.length > 0
+        ) {
+
+            out.textContent +=
+                "SIGNAL DIJUMPAI:\n\n";
+
+            allSignals.forEach(
+                function(signal, index) {
+
+                    out.textContent +=
+                        (index + 1) +
+                        ". " +
+                        signal.symbol +
+                        " | " +
+                        signal.date +
+                        " | RM " +
+                        signal.close +
+                        " | " +
+                        signal.signal_name +
+                        "\n";
+
+                }
+            );
+
+        } else {
+
+            out.textContent +=
+                "Tiada signal ditemui.\n";
+
+        }
+
+        if (
+            allErrors.length > 0
+        ) {
+
+            out.textContent +=
+                "\n\nERROR / 429:\n";
+
+            allErrors.forEach(
+                function(error) {
+
+                    out.textContent +=
+                        error.symbol +
+                        " → " +
+                        error.error +
+                        "\n";
+
+                }
+            );
+
+        }
+
+    } catch (error) {
+
+        out.textContent +=
+            "\nSCAN ERROR\n\n" +
+            error;
+
+    }
+
+    button.disabled = false;
+
+}
+
+
+function sleep(ms) {
+
+    return new Promise(
+        resolve =>
+            setTimeout(
+                resolve,
+                ms
+            )
+    );
+
+}
+
+
+async function testHistory() {
+
+    const out =
+        document.getElementById(
+            "out"
+        );
+
+    out.textContent =
+        "Testing historical signals...";
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/test/history"
+            );
+
+        if (!response.ok) {
+
+            throw new Error(
+                "HTTP " +
+                response.status
+            );
+
+        }
+
+        const data =
+            await response.json();
+
+        out.textContent =
+            JSON.stringify(
+                data,
+                null,
+                2
+            );
+
+    } catch (error) {
+
+        out.textContent =
+            "HISTORY ERROR\n\n" +
+            error;
+
+    }
+
+}
+
+</script>
+
+</body>
+
+</html>
+'''
            
