@@ -1095,8 +1095,6 @@ Ready.
 
 <script>
 
-<script>
-
 async function scanUniverse() {
 
     const out =
