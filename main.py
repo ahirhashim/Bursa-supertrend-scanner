@@ -1,27 +1,23 @@
 import os
 import time
 import threading
-import requests
-
+import sqlite3
 from datetime import datetime, timezone, timedelta
+
+import requests
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-
 # ============================================================
 # APP
 # ============================================================
-
 app = FastAPI(title="Bursa Supertrend Scanner")
-
 
 # ============================================================
 # ITICK
 # ============================================================
-
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
-
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 
 ITICK_REQUEST_DELAY = float(
@@ -30,27 +26,88 @@ ITICK_REQUEST_DELAY = float(
 
 ITICK_MAX_RETRIES = 2
 
-
 # ============================================================
 # SUPERTREND
 # ============================================================
-
 ATR_LENGTH = 10
 SUPERTREND_FACTOR = 1.0
-
 
 # ============================================================
 # BATCH SETTINGS
 # ============================================================
-
 DEFAULT_BATCH_SIZE = 5
 DEFAULT_MAX_SIGNALS = 5
 
+# ============================================================
+# RECENT SIGNAL SETTINGS
+# ============================================================
+RECENT_SIGNAL_DAYS = 5
 
 # ============================================================
-# REQUEST PACING
+# DATABASE
 # ============================================================
+# Local development:
+#     ./data/recent_signals.db
+#
+# Render Persistent Disk:
+#     set DATA_DIR=/var/data
+#
+# IMPORTANT:
+# Render filesystem is ephemeral unless persistent disk
+# or managed datastore is used.
+# ============================================================
+DATA_DIR = os.getenv("DATA_DIR", "./data")
 
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(
+    DATA_DIR,
+    "recent_signals.db"
+)
+
+_db_lock = threading.Lock()
+
+
+def get_db():
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=30,
+        check_same_thread=False
+    )
+
+    conn.row_factory = sqlite3.Row
+
+    return conn
+
+
+def init_database():
+    with _db_lock:
+        conn = get_db()
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recent_signals (
+                symbol TEXT PRIMARY KEY,
+                signal_date TEXT NOT NULL,
+                close REAL,
+                high REAL,
+                low REAL,
+                signal_name TEXT,
+                saved_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.commit()
+        conn.close()
+
+
+init_database()
+
+# ============================================================
+# ITICK REQUEST PACING
+# ============================================================
 _itick_lock = threading.Lock()
 _last_itick_request = 0.0
 
@@ -77,7 +134,6 @@ def wait_before_itick_request():
 # ============================================================
 # TEST SYMBOLS
 # ============================================================
-
 TEST_SYMBOLS = [
     "D&O",
     "SRIDGE",
@@ -86,11 +142,9 @@ TEST_SYMBOLS = [
     "INARI"
 ]
 
-
 # ============================================================
 # BURSA UNIVERSE - 36
 # ============================================================
-
 BURSA_UNIVERSE = [
     "D&O",
     "SRIDGE",
@@ -130,10 +184,16 @@ BURSA_UNIVERSE = [
     "VS"
 ]
 
+# ============================================================
+# DATE / TIME
+# ============================================================
+def utc_now():
+    return datetime.now(timezone.utc)
 
-# ============================================================
-# DATE FORMAT
-# ============================================================
+
+def iso_now():
+    return utc_now().isoformat()
+
 
 def format_timestamp(timestamp):
 
@@ -158,9 +218,173 @@ def format_timestamp(timestamp):
 
 
 # ============================================================
+# RECENT SIGNAL DATABASE
+# ============================================================
+def cleanup_expired_signals():
+
+    now = iso_now()
+
+    with _db_lock:
+
+        conn = get_db()
+
+        conn.execute(
+            """
+            DELETE FROM recent_signals
+            WHERE expires_at <= ?
+            """,
+            (now,)
+        )
+
+        conn.commit()
+        conn.close()
+
+
+def save_recent_signal(signal):
+
+    cleanup_expired_signals()
+
+    saved_time = utc_now()
+
+    expires_time = (
+        saved_time
+        + timedelta(days=RECENT_SIGNAL_DAYS)
+    )
+
+    with _db_lock:
+
+        conn = get_db()
+
+        conn.execute(
+            """
+            INSERT INTO recent_signals (
+                symbol,
+                signal_date,
+                close,
+                high,
+                low,
+                signal_name,
+                saved_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+
+            ON CONFLICT(symbol)
+            DO UPDATE SET
+                signal_date = excluded.signal_date,
+                close = excluded.close,
+                high = excluded.high,
+                low = excluded.low,
+                signal_name = excluded.signal_name,
+                saved_at = excluded.saved_at,
+                expires_at = excluded.expires_at
+            """,
+            (
+                signal.get("symbol"),
+                signal.get("date"),
+                signal.get("close"),
+                signal.get("high"),
+                signal.get("low"),
+                signal.get("signal_name"),
+                saved_time.isoformat(),
+                expires_time.isoformat()
+            )
+        )
+
+        conn.commit()
+        conn.close()
+
+
+def get_recent_signals():
+
+    cleanup_expired_signals()
+
+    with _db_lock:
+
+        conn = get_db()
+
+        rows = conn.execute(
+            """
+            SELECT
+                symbol,
+                signal_date,
+                close,
+                high,
+                low,
+                signal_name,
+                saved_at,
+                expires_at
+            FROM recent_signals
+            ORDER BY saved_at DESC
+            """
+        ).fetchall()
+
+        conn.close()
+
+    results = []
+
+    for row in rows:
+
+        results.append(
+            {
+                "symbol": row["symbol"],
+                "date": row["signal_date"],
+                "close": row["close"],
+                "high": row["high"],
+                "low": row["low"],
+                "signal_name": row["signal_name"],
+                "saved_at": row["saved_at"],
+                "expires_at": row["expires_at"]
+            }
+        )
+
+    return results
+
+
+def get_recent_symbols():
+
+    cleanup_expired_signals()
+
+    with _db_lock:
+
+        conn = get_db()
+
+        rows = conn.execute(
+            """
+            SELECT symbol
+            FROM recent_signals
+            """
+        ).fetchall()
+
+        conn.close()
+
+    return {
+        row["symbol"]
+        for row in rows
+    }
+
+
+def remove_recent_signal(symbol):
+
+    with _db_lock:
+
+        conn = get_db()
+
+        conn.execute(
+            """
+            DELETE FROM recent_signals
+            WHERE symbol = ?
+            """,
+            (symbol,)
+        )
+
+        conn.commit()
+        conn.close()
+
+
+# ============================================================
 # TRUE RANGE
 # ============================================================
-
 def true_range(
     high,
     low,
@@ -181,7 +405,6 @@ def true_range(
 # ============================================================
 # SUPERTREND
 # ============================================================
-
 def calculate_supertrend(
     candles,
     atr_length=10,
@@ -189,6 +412,7 @@ def calculate_supertrend(
 ):
 
     if not candles:
+
         return []
 
     parsed = []
@@ -219,15 +443,15 @@ def calculate_supertrend(
     # --------------------------------------------------------
     # TRUE RANGE
     # --------------------------------------------------------
-
     trs = []
 
     for i, candle in enumerate(parsed):
 
-        previous_close = None
-
-        if i > 0:
-            previous_close = parsed[i - 1]["c"]
+        previous_close = (
+            parsed[i - 1]["c"]
+            if i > 0
+            else None
+        )
 
         trs.append(
             true_range(
@@ -238,9 +462,8 @@ def calculate_supertrend(
         )
 
     # --------------------------------------------------------
-    # WILDER ATR
+    # ATR - WILDER / RMA
     # --------------------------------------------------------
-
     atr_values = [None] * len(parsed)
 
     first_atr = (
@@ -268,7 +491,6 @@ def calculate_supertrend(
     # --------------------------------------------------------
     # SUPERTREND
     # --------------------------------------------------------
-
     result = []
 
     final_upper = None
@@ -318,110 +540,99 @@ def calculate_supertrend(
 
         else:
 
-            previous_close = parsed[i - 1]["c"]
+            previous_close = (
+                parsed[i - 1]["c"]
+            )
 
-            previous_final_upper = final_upper
-            previous_final_lower = final_lower
+            previous_final_upper = (
+                final_upper
+            )
+
+            previous_final_lower = (
+                final_lower
+            )
 
             if (
-                basic_upper < previous_final_upper
-                or previous_close > previous_final_upper
+                basic_upper
+                < previous_final_upper
+                or previous_close
+                > previous_final_upper
             ):
 
                 final_upper = basic_upper
 
             else:
 
-                final_upper = previous_final_upper
+                final_upper = (
+                    previous_final_upper
+                )
 
             if (
-                basic_lower > previous_final_lower
-                or previous_close < previous_final_lower
+                basic_lower
+                > previous_final_lower
+                or previous_close
+                < previous_final_lower
             ):
 
                 final_lower = basic_lower
 
             else:
 
-                final_lower = previous_final_lower
-
-        # ----------------------------------------------------
-        # DIRECTION
-        # -1 = BULL
-        #  1 = BEAR
-        # ----------------------------------------------------
+                final_lower = (
+                    previous_final_lower
+                )
 
         if previous_direction is None:
 
-            if candle["c"] <= final_upper:
-                direction = 1
-            else:
-                direction = -1
+            direction = (
+                1
+                if candle["c"] <= final_upper
+                else -1
+            )
 
         else:
 
             if previous_direction == 1:
 
-                if candle["c"] > final_upper:
-                    direction = -1
-                else:
-                    direction = 1
+                direction = (
+                    -1
+                    if candle["c"] > final_upper
+                    else 1
+                )
 
             else:
 
-                if candle["c"] < final_lower:
-                    direction = 1
-                else:
-                    direction = -1
+                direction = (
+                    1
+                    if candle["c"] < final_lower
+                    else -1
+                )
 
-        # ----------------------------------------------------
-        # SUPERTREND VALUE
-        # ----------------------------------------------------
+        supertrend = (
+            final_lower
+            if direction < 0
+            else final_upper
+        )
 
-        if direction < 0:
-            supertrend = final_lower
-        else:
-            supertrend = final_upper
-
-        # ----------------------------------------------------
-        # FLIP
-        # ----------------------------------------------------
-
-        flip = False
-
-        if (
+        flip = (
             previous_direction is not None
             and previous_direction > 0
             and direction < 0
-        ):
+        )
 
-            flip = True
-
-        # ----------------------------------------------------
-        # HIGH BREAK
-        # ----------------------------------------------------
-
-        high_break = False
-
-        if i > 0:
-
-            previous_high = parsed[i - 1]["h"]
-
-            if (
-                direction < 0
-                and candle["c"] > previous_high
-            ):
-
-                high_break = True
-
-        # ----------------------------------------------------
-        # SIGNAL
-        # ----------------------------------------------------
+        high_break = (
+            i > 0
+            and direction < 0
+            and candle["c"]
+            > parsed[i - 1]["h"]
+        )
 
         if flip and high_break:
 
             signal = 3
-            signal_name = "FLIP + HIGH BREAK"
+            signal_name = (
+                "FLIP + HIGH BREAK"
+            )
 
         elif flip:
 
@@ -459,18 +670,22 @@ def calculate_supertrend(
 # ============================================================
 # FORMAT RESULT
 # ============================================================
-
 def format_result(candle):
 
-    direction = candle.get("direction")
+    direction = candle.get(
+        "direction"
+    )
 
     if direction == -1:
+
         trend = "BULL"
 
     elif direction == 1:
+
         trend = "BEAR"
 
     else:
+
         trend = "NA"
 
     return {
@@ -481,7 +696,9 @@ def format_result(candle):
         "high": candle.get("h"),
         "low": candle.get("l"),
         "atr10": candle.get("atr"),
-        "supertrend": candle.get("supertrend"),
+        "supertrend": candle.get(
+            "supertrend"
+        ),
         "direction": direction,
         "trend": trend,
         "flip": candle.get(
@@ -506,7 +723,6 @@ def format_result(candle):
 # ============================================================
 # FETCH KLINE
 # ============================================================
-
 def fetch_kline(
     symbol,
     limit=50
@@ -517,8 +733,9 @@ def fetch_kline(
         return {
             "ok": False,
             "symbol": symbol,
-            "error":
+            "error": (
                 "ITICK_API_KEY belum diset."
+            )
         }
 
     headers = {
@@ -554,14 +771,15 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error":
-                    f"K-line request error: {error}"
+                "error": (
+                    f"K-line request error: "
+                    f"{error}"
+                )
             }
 
         # ----------------------------------------------------
-        # 429
+        # RATE LIMIT
         # ----------------------------------------------------
-
         if response.status_code == 429:
 
             if attempt >= ITICK_MAX_RETRIES:
@@ -569,21 +787,27 @@ def fetch_kline(
                 return {
                     "ok": False,
                     "symbol": symbol,
-                    "error":
+                    "error": (
                         "HTTP 429 selepas retry."
+                    )
                 }
 
-            retry_after = response.headers.get(
-                "Retry-After"
+            retry_after = (
+                response.headers.get(
+                    "Retry-After"
+                )
             )
 
             if retry_after:
 
                 try:
+
                     sleep_seconds = float(
                         retry_after
                     )
+
                 except Exception:
+
                     sleep_seconds = (
                         2.0
                         * (2 ** attempt)
@@ -597,7 +821,10 @@ def fetch_kline(
                 )
 
             sleep_seconds = min(
-                max(sleep_seconds, 2.0),
+                max(
+                    sleep_seconds,
+                    2.0
+                ),
                 30.0
             )
 
@@ -608,18 +835,22 @@ def fetch_kline(
             continue
 
         # ----------------------------------------------------
-        # OTHER HTTP ERROR
+        # HTTP ERROR
         # ----------------------------------------------------
-
         if response.status_code != 200:
 
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error":
-                    f"HTTP {response.status_code}"
+                "error": (
+                    f"HTTP "
+                    f"{response.status_code}"
+                )
             }
 
+        # ----------------------------------------------------
+        # JSON
+        # ----------------------------------------------------
         try:
 
             data = response.json()
@@ -629,17 +860,21 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error":
-                    "K-line response bukan JSON."
+                "error": (
+                    "K-line response "
+                    "bukan JSON."
+                )
             }
 
+        # ----------------------------------------------------
+        # ITICK RESPONSE
+        # ----------------------------------------------------
         if data.get("code") != 0:
 
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error":
-                    str(data)
+                "error": str(data)
             }
 
         raw = data.get(
@@ -656,16 +891,18 @@ def fetch_kline(
             return {
                 "ok": False,
                 "symbol": symbol,
-                "error":
+                "error": (
                     "Tiada daily candle."
+                )
             }
 
         try:
 
             raw = sorted(
                 raw,
-                key=lambda x:
-                    float(x.get("t", 0))
+                key=lambda x: float(
+                    x.get("t", 0)
+                )
             )
 
         except Exception:
@@ -681,15 +918,15 @@ def fetch_kline(
     return {
         "ok": False,
         "symbol": symbol,
-        "error":
+        "error": (
             "K-line request gagal."
+        )
     }
 
 
 # ============================================================
 # CALCULATE SYMBOL
 # ============================================================
-
 def calculate_symbol(symbol):
 
     fetched = fetch_kline(
@@ -712,8 +949,10 @@ def calculate_symbol(symbol):
         return {
             "ok": False,
             "symbol": symbol,
-            "error":
-                "Supertrend calculation gagal."
+            "error": (
+                "Supertrend "
+                "calculation gagal."
+            )
         }
 
     latest = calculated[-1]
@@ -734,8 +973,9 @@ def calculate_symbol(symbol):
     return {
         "ok": True,
         "symbol": symbol,
-        "latest":
-            format_result(latest),
+        "latest": format_result(
+            latest
+        ),
         "historical_signals":
             historical_signals
     }
@@ -744,7 +984,6 @@ def calculate_symbol(symbol):
 # ============================================================
 # HEALTH
 # ============================================================
-
 @app.get("/api/health")
 def health():
 
@@ -756,12 +995,24 @@ def health():
 
 
 # ============================================================
-# BATCH UNIVERSE SCAN
-#
-# start = kedudukan mula
-# batch_size = berapa kaunter satu batch
+# RECENT SIGNALS
 # ============================================================
+@app.get("/api/recent-signals")
+def recent_signals():
 
+    signals = get_recent_signals()
+
+    return {
+        "ok": True,
+        "days": RECENT_SIGNAL_DAYS,
+        "count": len(signals),
+        "signals": signals
+    }
+
+
+# ============================================================
+# BATCH UNIVERSE SCAN
+# ============================================================
 @app.get("/api/test/universe")
 def test_universe(
     start: int = 0,
@@ -769,12 +1020,15 @@ def test_universe(
 ):
 
     if start < 0:
+
         start = 0
 
     if batch_size < 1:
+
         batch_size = 1
 
     if batch_size > 10:
+
         batch_size = 10
 
     end = min(
@@ -786,11 +1040,37 @@ def test_universe(
         start:end
     ]
 
+    # --------------------------------------------------------
+    # Recent signals that should be skipped
+    # --------------------------------------------------------
+    saved_symbols = (
+        get_recent_symbols()
+    )
+
     scanner = []
     errors = []
+    skipped = []
 
     for symbol in symbols:
 
+        # ----------------------------------------------------
+        # SKIP RECENT SIGNAL
+        # ----------------------------------------------------
+        if symbol in saved_symbols:
+
+            skipped.append(
+                {
+                    "symbol": symbol,
+                    "reason":
+                        "RECENT SIGNAL"
+                }
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # NORMAL SCAN
+        # ----------------------------------------------------
         result = calculate_symbol(
             symbol
         )
@@ -800,11 +1080,10 @@ def test_universe(
             errors.append(
                 {
                     "symbol": symbol,
-                    "error":
-                        result.get(
-                            "error",
-                            "Unknown error"
-                        )
+                    "error": result.get(
+                        "error",
+                        "Unknown error"
+                    )
                 }
             )
 
@@ -815,18 +1094,25 @@ def test_universe(
             {}
         )
 
-        signal = latest.get(
+        if latest.get(
             "signal",
             0
-        )
+        ) != 0:
 
-        if signal != 0:
+            signal = {
+                "symbol": symbol,
+                **latest
+            }
 
             scanner.append(
-                {
-                    "symbol": symbol,
-                    **latest
-                }
+                signal
+            )
+
+            # -----------------------------------------------
+            # AUTO SAVE SIGNAL
+            # -----------------------------------------------
+            save_recent_signal(
+                signal
             )
 
     next_start = end
@@ -842,14 +1128,16 @@ def test_universe(
         "batch_size": len(symbols),
         "requested_count":
             len(BURSA_UNIVERSE),
-        "scanned_count":
-            end,
+        "scanned_count": end,
         "remaining_count":
             len(BURSA_UNIVERSE) - end,
         "done": done,
         "scanner": scanner,
         "signals_only":
             scanner.copy(),
+        "skipped_count":
+            len(skipped),
+        "skipped": skipped,
         "error_count":
             len(errors),
         "errors": errors
@@ -857,9 +1145,102 @@ def test_universe(
 
 
 # ============================================================
+# RESCAN SAVED
+# ============================================================
+@app.get("/api/rescan-saved")
+def rescan_saved():
+
+    saved = get_recent_signals()
+
+    results = []
+    errors = []
+
+    for item in saved:
+
+        symbol = item["symbol"]
+
+        result = calculate_symbol(
+            symbol
+        )
+
+        if not result.get("ok"):
+
+            errors.append(
+                {
+                    "symbol": symbol,
+                    "error": result.get(
+                        "error",
+                        "Unknown error"
+                    )
+                }
+            )
+
+            continue
+
+        latest = result.get(
+            "latest",
+            {}
+        )
+
+        # ----------------------------------------------------
+        # STILL SIGNAL
+        # ----------------------------------------------------
+        if latest.get(
+            "signal",
+            0
+        ) != 0:
+
+            signal = {
+                "symbol": symbol,
+                **latest
+            }
+
+            save_recent_signal(
+                signal
+            )
+
+            results.append(
+                {
+                    "symbol": symbol,
+                    "status":
+                        "SIGNAL STILL ACTIVE",
+                    "signal": signal
+                }
+            )
+
+        # ----------------------------------------------------
+        # NO LONGER SIGNAL
+        # ----------------------------------------------------
+        else:
+
+            remove_recent_signal(
+                symbol
+            )
+
+            results.append(
+                {
+                    "symbol": symbol,
+                    "status":
+                        "SIGNAL CLEARED"
+                }
+            )
+
+    return {
+        "ok": True,
+        "rescanned_count":
+            len(saved),
+        "results": results,
+        "error_count":
+            len(errors),
+        "errors": errors,
+        "recent_signals":
+            get_recent_signals()
+    }
+
+
+# ============================================================
 # TEST 5
 # ============================================================
-
 @app.get("/api/test/5")
 def test_five():
 
@@ -874,15 +1255,13 @@ def test_five():
     return {
         "requested_count":
             len(TEST_SYMBOLS),
-        "results":
-            results
+        "results": results
     }
 
 
 # ============================================================
 # HISTORICAL
 # ============================================================
-
 @app.get("/api/test/history")
 def test_history():
 
@@ -912,15 +1291,13 @@ def test_history():
             results.append(result)
 
     return {
-        "results":
-            results
+        "results": results
     }
 
 
 # ============================================================
 # HOME PAGE
 # ============================================================
-
 @app.get(
     "/",
     response_class=HTMLResponse
@@ -934,9 +1311,10 @@ def home():
 
 <head>
 
-<meta name="viewport"
-      content="width=device-width,
-               initial-scale=1.0">
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
 <title>
 Bursa Supertrend Scanner
@@ -944,99 +1322,132 @@ Bursa Supertrend Scanner
 
 <style>
 
-body {
-    margin: 0;
-    padding: 20px;
-    background: #101010;
-    color: #eeeeee;
-    font-family: Arial, sans-serif;
+body{
+    margin:0;
+    padding:20px;
+    background:#101010;
+    color:#eeeeee;
+    font-family:Arial,sans-serif;
 }
 
-.container {
-    max-width: 900px;
-    margin: auto;
+.container{
+    max-width:900px;
+    margin:auto;
 }
 
-h1 {
-    margin-bottom: 5px;
-    font-size: 24px;
+h1{
+    margin-bottom:5px;
+    font-size:24px;
 }
 
-.subtitle {
-    color: #999999;
-    margin-bottom: 20px;
+.subtitle{
+    color:#999999;
+    margin-bottom:20px;
 }
 
-button {
-    width: 100%;
-    padding: 14px;
-    margin-top: 10px;
-    border: none;
-    border-radius: 8px;
-    background: #1f8f4d;
-    color: white;
-    font-size: 16px;
-    font-weight: bold;
+button{
+    width:100%;
+    padding:14px;
+    margin-top:10px;
+    border:none;
+    border-radius:8px;
+    background:#1f8f4d;
+    color:white;
+    font-size:16px;
+    font-weight:bold;
 }
 
-button:disabled {
-    opacity: 0.5;
+button:disabled{
+    opacity:.5;
 }
 
-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 12px;
-    margin-top: 8px;
-    margin-bottom: 8px;
-    border-radius: 8px;
-    border: 1px solid #444444;
-    background: #181818;
-    color: white;
-    font-size: 16px;
+.secondary{
+    background:#333333;
 }
 
-label {
-    display: block;
-    margin-top: 15px;
-    color: #cccccc;
+.danger{
+    background:#7b3030;
 }
 
-pre {
-    margin-top: 20px;
-    padding: 15px;
-    background: #181818;
-    border-radius: 8px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 13px;
+input{
+    width:100%;
+    box-sizing:border-box;
+    padding:12px;
+    margin-top:8px;
+    margin-bottom:8px;
+    border-radius:8px;
+    border:1px solid #444;
+    background:#181818;
+    color:white;
+    font-size:16px;
 }
 
-.info {
-    margin-top: 15px;
-    padding: 12px;
-    background: #181818;
-    border-radius: 8px;
-    color: #bbbbbb;
-    font-size: 13px;
+label{
+    display:block;
+    margin-top:15px;
+    color:#cccccc;
 }
 
-.signal {
-    margin-top: 8px;
-    padding: 10px;
-    background: #163b25;
-    border-radius: 6px;
+pre{
+    margin-top:20px;
+    padding:15px;
+    background:#181818;
+    border-radius:8px;
+    overflow-x:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+    font-size:13px;
 }
 
-.error {
-    color: #ff7777;
+.card{
+    margin-top:20px;
+    padding:15px;
+    background:#181818;
+    border-radius:10px;
+}
+
+.card-title{
+    font-size:18px;
+    font-weight:bold;
+    margin-bottom:10px;
+}
+
+.info{
+    margin-top:15px;
+    padding:12px;
+    background:#181818;
+    border-radius:8px;
+    color:#bbbbbb;
+    font-size:13px;
+}
+
+.signal{
+    padding:12px;
+    margin-top:8px;
+    border-radius:8px;
+    background:#222222;
+    border-left:4px solid #1f8f4d;
+}
+
+.signal-title{
+    font-size:16px;
+    font-weight:bold;
+}
+
+.signal-detail{
+    color:#bbbbbb;
+    margin-top:5px;
+    font-size:13px;
+}
+
+.empty{
+    color:#888888;
+    font-size:14px;
 }
 
 </style>
 
 </head>
-
 
 <body>
 
@@ -1051,6 +1462,47 @@ Bursa Universe • Daily • ATR 10 / Factor 1.0
 </div>
 
 
+<!-- ======================================================
+     RECENT SIGNALS
+======================================================= -->
+
+<div class="card">
+
+<div class="card-title">
+RECENT SIGNALS
+</div>
+
+<div id="recentSignals">
+Loading...
+</div>
+
+<button
+    class="secondary"
+    onclick="loadRecentSignals()"
+>
+REFRESH RECENT SIGNALS
+</button>
+
+<button
+    class="danger"
+    onclick="rescanSaved()"
+>
+RESCAN SAVED
+</button>
+
+</div>
+
+
+<!-- ======================================================
+     SCANNER
+======================================================= -->
+
+<div class="card">
+
+<div class="card-title">
+BURSA UNIVERSE SCANNER
+</div>
+
 <label>
 MAX SIGNALS
 </label>
@@ -1062,7 +1514,6 @@ MAX SIGNALS
     max="20"
     value="5"
 >
-
 
 <button
     id="scanButton"
@@ -1080,17 +1531,38 @@ SCAN NEXT 5
 </button>
 
 <button
+    class="secondary"
     onclick="testHistory()"
 >
 TEST HISTORICAL SIGNAL
 </button>
 
+</div>
+
 
 <div class="info">
-SCAN 5 akan scan 5 kaunter sahaja dan berhenti.
-Tekan SCAN NEXT 5 untuk sambung batch berikutnya.
-MAX SIGNALS akan menjadi had keseluruhan signal.
+
+<b>SCAN 5</b>
+akan scan 5 kaunter sahaja dan berhenti.
+
+<br><br>
+
+<b>SCAN NEXT 5</b>
+akan sambung batch berikutnya.
+
+<br><br>
+
+Kaunter yang masih berada dalam
+<b>RECENT SIGNALS</b>
+akan di-skip secara automatik.
+
+<br><br>
+
+<b>RESCAN SAVED</b>
+digunakan jika mahu periksa semula signal yang telah disimpan.
+
 </div>
+
 
 <pre id="out">
 Ready.
@@ -1102,24 +1574,171 @@ Ready.
 <script>
 
 let nextStart = 0;
+
 let totalSignals = 0;
+
 let allSignals = [];
+
 let allErrors = [];
+
 let scannedCount = 0;
+
 let scanDone = false;
 
 
-async function scanFirstBatch() {
+// ========================================================
+// FORMAT NUMBER
+// ========================================================
+function formatPrice(value){
+
+    if(value === null || value === undefined){
+        return "-";
+    }
+
+    return Number(value).toFixed(3);
+}
+
+
+// ========================================================
+// LOAD RECENT SIGNALS
+// ========================================================
+async function loadRecentSignals(){
+
+    const box =
+        document.getElementById(
+            "recentSignals"
+        );
+
+    box.textContent =
+        "Loading...";
+
+    try{
+
+        const response =
+            await fetch(
+                "/api/recent-signals"
+            );
+
+        if(!response.ok){
+
+            throw new Error(
+                "HTTP " +
+                response.status
+            );
+        }
+
+        const data =
+            await response.json();
+
+        if(
+            !data.signals ||
+            data.signals.length === 0
+        ){
+
+            box.innerHTML =
+                '<div class="empty">' +
+                'Tiada Recent Signal.' +
+                '</div>';
+
+            return;
+        }
+
+        let html = "";
+
+        data.signals.forEach(
+            function(signal){
+
+                html +=
+                    '<div class="signal">' +
+
+                    '<div class="signal-title">' +
+                    signal.symbol +
+                    ' | RM ' +
+                    formatPrice(
+                        signal.close
+                    ) +
+                    '</div>' +
+
+                    '<div class="signal-detail">' +
+                    signal.date +
+                    ' | ' +
+                    signal.signal_name +
+                    '</div>' +
+
+                    '<div class="signal-detail">' +
+                    'Expired: ' +
+                    formatExpiry(
+                        signal.expires_at
+                    ) +
+                    '</div>' +
+
+                    '</div>';
+            }
+        );
+
+        box.innerHTML = html;
+
+    }
+    catch(error){
+
+        box.textContent =
+            "ERROR\n\n" +
+            error;
+    }
+}
+
+
+// ========================================================
+// FORMAT EXPIRY
+// ========================================================
+function formatExpiry(value){
+
+    if(!value){
+        return "-";
+    }
+
+    try{
+
+        const d =
+            new Date(value);
+
+        return d.toLocaleString(
+            "ms-MY",
+            {
+                dateStyle:"medium",
+                timeStyle:"short"
+            }
+        );
+
+    }
+    catch(error){
+
+        return value;
+    }
+}
+
+
+// ========================================================
+// FIRST BATCH
+// ========================================================
+async function scanFirstBatch(){
 
     nextStart = 0;
+
     totalSignals = 0;
+
     allSignals = [];
+
     allErrors = [];
+
     scannedCount = 0;
+
     scanDone = false;
 
     const out =
-        document.getElementById("out");
+        document.getElementById(
+            "out"
+        );
 
     out.textContent =
         "MULA SCAN 5...\n\n";
@@ -1128,18 +1747,27 @@ async function scanFirstBatch() {
 }
 
 
-async function scanNextBatch() {
+// ========================================================
+// NEXT BATCH
+// ========================================================
+async function scanNextBatch(){
 
-    if (scanDone) {
+    if(scanDone){
+
         return;
     }
 
     const maxSignals =
         parseInt(
-            document.getElementById("maxSignals").value
+            document.getElementById(
+                "maxSignals"
+            ).value
         ) || 5;
 
-    if (totalSignals >= maxSignals) {
+    if(
+        totalSignals >=
+        maxSignals
+    ){
 
         outMessage(
             "\nMAX SIGNALS " +
@@ -1148,6 +1776,7 @@ async function scanNextBatch() {
         );
 
         updateButtons();
+
         return;
     }
 
@@ -1155,23 +1784,35 @@ async function scanNextBatch() {
 }
 
 
-async function scanOneBatch() {
+// ========================================================
+// SCAN ONE BATCH
+// ========================================================
+async function scanOneBatch(){
 
     const out =
-        document.getElementById("out");
+        document.getElementById(
+            "out"
+        );
 
     const scanButton =
-        document.getElementById("scanButton");
+        document.getElementById(
+            "scanButton"
+        );
 
     const nextButton =
-        document.getElementById("nextButton");
+        document.getElementById(
+            "nextButton"
+        );
 
     const maxSignals =
         parseInt(
-            document.getElementById("maxSignals").value
+            document.getElementById(
+                "maxSignals"
+            ).value
         ) || 5;
 
     scanButton.disabled = true;
+
     nextButton.disabled = true;
 
     out.textContent +=
@@ -1183,7 +1824,7 @@ async function scanOneBatch() {
         (nextStart + 5) +
         "\n\n";
 
-    try {
+    try{
 
         const response =
             await fetch(
@@ -1193,7 +1834,7 @@ async function scanOneBatch() {
                 "&batch_size=5"
             );
 
-        if (!response.ok) {
+        if(!response.ok){
 
             throw new Error(
                 "HTTP " +
@@ -1210,26 +1851,31 @@ async function scanOneBatch() {
         scanDone =
             data.done;
 
-        /* ---------------------------------
-           SIGNAL
-           --------------------------------- */
 
-        if (
+        // ------------------------------------------------
+        // SIGNAL
+        // ------------------------------------------------
+        if(
             data.scanner &&
             data.scanner.length > 0
-        ) {
+        ){
 
-            for (
-                const signal of data.scanner
-            ) {
+            for(
+                const signal
+                of data.scanner
+            ){
 
-                if (
-                    totalSignals >= maxSignals
-                ) {
+                if(
+                    totalSignals >=
+                    maxSignals
+                ){
+
                     break;
                 }
 
-                allSignals.push(signal);
+                allSignals.push(
+                    signal
+                );
 
                 totalSignals++;
 
@@ -1237,37 +1883,68 @@ async function scanOneBatch() {
                     "SIGNAL #" +
                     totalSignals +
                     "\n" +
+
                     signal.symbol +
                     " | " +
                     signal.date +
                     " | RM " +
-                    signal.close +
+                    formatPrice(
+                        signal.close
+                    ) +
                     " | " +
                     signal.signal_name +
                     "\n\n";
             }
 
-        } else {
+        }
+        else{
 
             out.textContent +=
-                "Tiada signal dalam batch ini.\n\n";
+                "Tiada signal " +
+                "baru dalam batch ini.\n\n";
         }
 
 
-        /* ---------------------------------
-           ERROR
-           --------------------------------- */
+        // ------------------------------------------------
+        // SKIPPED
+        // ------------------------------------------------
+        if(
+            data.skipped &&
+            data.skipped.length > 0
+        ){
 
-        if (
+            out.textContent +=
+                "SKIP RECENT SIGNAL: " +
+                data.skipped.length +
+                "\n";
+
+            data.skipped.forEach(
+                function(item){
+
+                    out.textContent +=
+                        item.symbol +
+                        " -> RECENT SIGNAL\n";
+                }
+            );
+
+            out.textContent += "\n";
+        }
+
+
+        // ------------------------------------------------
+        // ERRORS
+        // ------------------------------------------------
+        if(
             data.errors &&
             data.errors.length > 0
-        ) {
+        ){
 
             data.errors.forEach(
-                function(error) {
+                function(error){
 
-                    allErrors.push(error);
-
+                    allErrors.push(
+                        error
+                    );
                 }
             );
 
@@ -1278,17 +1955,18 @@ async function scanOneBatch() {
         }
 
 
-        /* ---------------------------------
-           PROGRESS
-           --------------------------------- */
-
+        // ------------------------------------------------
+        // PROGRESS
+        // ------------------------------------------------
         out.textContent +=
             "--------------------------------\n" +
+
             "Progress: " +
             scannedCount +
             " / " +
             data.requested_count +
             "\n" +
+
             "Signal: " +
             totalSignals +
             " / " +
@@ -1296,21 +1974,17 @@ async function scanOneBatch() {
             "\n";
 
 
-        /* ---------------------------------
-           NEXT POSITION
-           --------------------------------- */
-
         nextStart =
             data.end;
 
 
-        /* ---------------------------------
-           STATUS
-           --------------------------------- */
-
-        if (
-            totalSignals >= maxSignals
-        ) {
+        // ------------------------------------------------
+        // STOP CONDITIONS
+        // ------------------------------------------------
+        if(
+            totalSignals >=
+            maxSignals
+        ){
 
             scanDone = true;
 
@@ -1320,38 +1994,41 @@ async function scanOneBatch() {
                 " DICAPAI.\n" +
                 "SCAN DIHENTIKAN.\n";
 
-        } else if (
-            data.done
-        ) {
+        }
+        else if(data.done){
 
             scanDone = true;
 
             out.textContent +=
                 "\nSEMUA UNIVERSE SELESAI.\n";
 
-        } else {
+        }
+        else{
 
             out.textContent +=
                 "\nBATCH INI SELESAI.\n" +
-                "Tekan SCAN NEXT 5 untuk sambung.\n";
+                "Tekan SCAN NEXT 5 " +
+                "untuk sambung.\n";
         }
 
 
-        /* ---------------------------------
-           SIGNAL SUMMARY
-           --------------------------------- */
-
+        // ------------------------------------------------
+        // ALL SIGNALS
+        // ------------------------------------------------
         out.textContent +=
             "\n================================\n" +
             "SIGNAL DIJUMPAI SETAKAT INI\n" +
             "================================\n";
 
-        if (
+        if(
             allSignals.length > 0
-        ) {
+        ){
 
             allSignals.forEach(
-                function(signal, index) {
+                function(
+                    signal,
+                    index
+                ){
 
                     out.textContent +=
                         (index + 1) +
@@ -1360,53 +2037,58 @@ async function scanOneBatch() {
                         " | " +
                         signal.date +
                         " | RM " +
-                        signal.close +
+                        formatPrice(
+                            signal.close
+                        ) +
                         " | " +
                         signal.signal_name +
                         "\n";
-
                 }
             );
 
-        } else {
+        }
+        else{
 
             out.textContent +=
                 "Tiada signal ditemui.\n";
         }
 
 
-        /* ---------------------------------
-           ERROR SUMMARY
-           --------------------------------- */
-
-        if (
+        // ------------------------------------------------
+        // ERRORS
+        // ------------------------------------------------
+        if(
             allErrors.length > 0
-        ) {
+        ){
 
             out.textContent +=
                 "\nERROR / 429:\n";
 
             allErrors.forEach(
-                function(error) {
+                function(error){
 
                     out.textContent +=
                         error.symbol +
                         " -> " +
                         error.error +
                         "\n";
-
                 }
             );
         }
 
 
-    } catch (error) {
+        // ------------------------------------------------
+        // REFRESH RECENT SIGNALS
+        // ------------------------------------------------
+        await loadRecentSignals();
+
+    }
+    catch(error){
 
         out.textContent +=
             "\nSCAN ERROR\n\n" +
             error;
     }
-
 
     scanButton.disabled = false;
 
@@ -1414,70 +2096,235 @@ async function scanOneBatch() {
 }
 
 
-/* -----------------------------------------
-   BUTTON CONTROL
-   ----------------------------------------- */
-
-function updateButtons() {
+// ========================================================
+// BUTTON STATE
+// ========================================================
+function updateButtons(){
 
     const scanButton =
-        document.getElementById("scanButton");
+        document.getElementById(
+            "scanButton"
+        );
 
     const nextButton =
-        document.getElementById("nextButton");
+        document.getElementById(
+            "nextButton"
+        );
 
     const maxSignals =
         parseInt(
-            document.getElementById("maxSignals").value
+            document.getElementById(
+                "maxSignals"
+            ).value
         ) || 5;
-
 
     scanButton.disabled = false;
 
-
-    if (
+    if(
         scanDone ||
         totalSignals >= maxSignals
-    ) {
+    ){
 
         nextButton.disabled = true;
 
-    } else {
+    }
+    else{
 
         nextButton.disabled = false;
     }
 }
 
 
-/* -----------------------------------------
-   OUTPUT HELPER
-   ----------------------------------------- */
+// ========================================================
+// OUTPUT MESSAGE
+// ========================================================
+function outMessage(
+    message
+){
 
-function outMessage(message) {
-
-    const out =
-        document.getElementById("out");
-
-    out.textContent += message;
+    document.getElementById(
+        "out"
+    ).textContent +=
+        message;
 }
 
 
-async function testHistory() {
+// ========================================================
+// RESCAN SAVED
+// ========================================================
+async function rescanSaved(){
 
     const out =
-        document.getElementById("out");
+        document.getElementById(
+            "out"
+        );
+
+    out.textContent =
+        "RESCAN SAVED...\n\n" +
+        "Sila tunggu...\n";
+
+    try{
+
+        const response =
+            await fetch(
+                "/api/rescan-saved"
+            );
+
+        if(!response.ok){
+
+            throw new Error(
+                "HTTP " +
+                response.status
+            );
+        }
+
+        const data =
+            await response.json();
+
+        out.textContent =
+            "================================\n" +
+            "RESCAN SAVED\n" +
+            "================================\n\n" +
+
+            "Jumlah saved sebelum rescan: " +
+            data.rescanned_count +
+            "\n\n";
+
+
+        if(
+            data.results &&
+            data.results.length > 0
+        ){
+
+            data.results.forEach(
+                function(item){
+
+                    out.textContent +=
+                        item.symbol +
+                        " -> " +
+                        item.status +
+                        "\n";
+
+                    if(
+                        item.signal
+                    ){
+
+                        out.textContent +=
+                            "   " +
+                            item.signal.signal_name +
+                            " | RM " +
+                            formatPrice(
+                                item.signal.close
+                            ) +
+                            " | " +
+                            item.signal.date +
+                            "\n";
+                    }
+                }
+            );
+
+        }
+        else{
+
+            out.textContent +=
+                "Tiada saved signal.\n";
+        }
+
+
+        if(
+            data.errors &&
+            data.errors.length > 0
+        ){
+
+            out.textContent +=
+                "\nERROR:\n";
+
+            data.errors.forEach(
+                function(error){
+
+                    out.textContent +=
+                        error.symbol +
+                        " -> " +
+                        error.error +
+                        "\n";
+                }
+            );
+        }
+
+
+        out.textContent +=
+            "\n================================\n" +
+            "RECENT SIGNALS TERKINI\n" +
+            "================================\n";
+
+        if(
+            data.recent_signals &&
+            data.recent_signals.length > 0
+        ){
+
+            data.recent_signals.forEach(
+                function(
+                    signal,
+                    index
+                ){
+
+                    out.textContent +=
+                        (index + 1) +
+                        ". " +
+                        signal.symbol +
+                        " | " +
+                        signal.date +
+                        " | RM " +
+                        formatPrice(
+                            signal.close
+                        ) +
+                        " | " +
+                        signal.signal_name +
+                        "\n";
+                }
+            );
+
+        }
+        else{
+
+            out.textContent +=
+                "Tiada Recent Signal.\n";
+        }
+
+
+        await loadRecentSignals();
+
+    }
+    catch(error){
+
+        out.textContent =
+            "RESCAN SAVED ERROR\n\n" +
+            error;
+    }
+}
+
+
+// ========================================================
+// HISTORICAL
+// ========================================================
+async function testHistory(){
+
+    const out =
+        document.getElementById(
+            "out"
+        );
 
     out.textContent =
         "Testing historical signals...";
 
-    try {
+    try{
 
         const response =
             await fetch(
                 "/api/test/history"
             );
 
-        if (!response.ok) {
+        if(!response.ok){
 
             throw new Error(
                 "HTTP " +
@@ -1495,7 +2342,8 @@ async function testHistory() {
                 2
             );
 
-    } catch (error) {
+    }
+    catch(error){
 
         out.textContent =
             "HISTORY ERROR\n\n" +
@@ -1504,10 +2352,14 @@ async function testHistory() {
 }
 
 
+// ========================================================
+// INITIAL LOAD
+// ========================================================
+loadRecentSignals();
+
 </script>
 
 </body>
 
 </html>
 '''
-           
