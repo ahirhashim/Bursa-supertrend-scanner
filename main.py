@@ -19,7 +19,7 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
-ITICK_REQUEST_DELAY = float(os.getenv("ITICK_REQUEST_DELAY", "10.0"))
+ITICK_REQUEST_DELAY = float(os.getenv("ITICK_REQUEST_DELAY", "20.0"))
 ITICK_MAX_RETRIES = 3
 
 # ============================================================
@@ -380,7 +380,7 @@ def fetch_kline(symbol, limit=50):
                 sleep_seconds = float(retry_after) if retry_after else 2.0 * (2 ** attempt)
             except Exception:
                 sleep_seconds = 2.0 * (2 ** attempt)
-            time.sleep(min(max(sleep_seconds, 2.0), 30.0))
+            time.sleep(min(max(sleep_seconds, 10.0), 90.0))
             continue
 
         if response.status_code != 200:
