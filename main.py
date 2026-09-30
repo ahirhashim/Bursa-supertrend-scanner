@@ -19,8 +19,8 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
-ITICK_REQUEST_DELAY = float(os.getenv("ITICK_REQUEST_DELAY", "1.0"))
-ITICK_MAX_RETRIES = 2
+ITICK_REQUEST_DELAY = float(os.getenv("ITICK_REQUEST_DELAY", "10.0"))
+ITICK_MAX_RETRIES = 3
 
 # ============================================================
 # SUPERTREND
