@@ -652,8 +652,9 @@ def test_universe(start: int = 0, batch_size: int = DEFAULT_BATCH_SIZE):
 @app.get("/api/test/volume-scan")
 def volume_scan(start: int = 0, batch_size: int = DEFAULT_BATCH_SIZE, symbols: str = ""):
     ordered = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    ordered = [s for s in ordered if s in BURSA_UNIVERSE]
-
+    ordered = [s for s in ordered if s in BURSA_UNIVERSE]   
+    ordered += [s for s in BURSA_UNIVERSE if s not in ordered]
+    
     if not ordered:
         return {"ok": False, "error": "Volume ranking belum dihantar.", "scanner": []}
 
