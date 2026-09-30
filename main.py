@@ -497,28 +497,41 @@ def fetch_daily_volume_batch(symbols):
         if not isinstance(payload, dict):
             return {"ok": False, "error": "Format data volume tidak dijangka.", "results": []}
 
-        results = []
-        for symbol in symbols:
-            candles = payload.get(symbol, [])
-            if not candles:
-                results.append({"symbol": symbol, "ok": False, "error": "Tiada daily candle"})
+    results = []
+
+    for symbol in symbols:
+        candles = payload.get(symbol, [])
+
+        # Fallback jika batch tidak memulangkan candle
+        if not candles:
+            single = fetch_kline(symbol, limit=1)
+
+            if single.get("ok") and single.get("candles"):
+                candles = single["candles"]
+            else:
+                results.append({
+                    "symbol": symbol,
+                    "ok": False,
+                    "error": single.get("error", "Tiada daily candle")
+                })
                 continue
 
-            candle = max(candles, key=lambda x: float(x.get("t", 0)))
-            try:
-                volume = float(candle.get("v", 0) or 0)
-            except Exception:
-                volume = 0.0
+        candle = max(candles, key=lambda x: float(x.get("t", 0)))
 
-            results.append({
-                "symbol": symbol,
-                "ok": True,
-                "date": format_timestamp(candle.get("t", 0)),
-                "volume": volume,
-                "close": candle.get("c"),
-                "high": candle.get("h"),
-                "low": candle.get("l")
-            })
+        try:
+            volume = float(candle.get("v", 0) or 0)
+        except Exception:
+            volume = 0.0
+
+        results.append({
+            "symbol": symbol,
+            "ok": True,
+            "date": format_timestamp(candle.get("t", 0)),
+            "volume": volume,
+            "close": candle.get("c"),
+            "high": candle.get("h"),
+            "low": candle.get("l")
+        })
 
         return {"ok": True, "results": results}
 
