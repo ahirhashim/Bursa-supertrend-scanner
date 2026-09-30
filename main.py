@@ -801,7 +801,7 @@ async function loadRecentSignals(){
   if(!d.signals.length){box.innerHTML='<div class="empty">Tiada Recent Signal.</div>';return}
   box.innerHTML=d.signals.map(s=>
    '<div class="signal"><div class="signal-title">'+s.symbol+' | RM '+price(s.close)+'</div>'+
-   '<div class="signal-detail">'+s.date+' | '+s.signal_name+'</div>'+\
+   '<div class="signal-detail">'+s.date+' | '+s.signal_name+'</div>'+
    '<div class="signal-detail">Expired: '+fmtExpiry(s.expires_at)+'</div></div>'
   ).join("");
  }catch(e){box.textContent="ERROR\n\n"+e}
@@ -893,6 +893,7 @@ async function scanOneBatch(){
   if(allErrors.length){out.textContent+="\nERROR / 429:\n";allErrors.forEach(x=>out.textContent+=x.symbol+" -> "+x.error+"\n")}
   await loadRecentSignals();
  }catch(e){out.textContent+="\nSCAN ERROR\n\n"+e}
+ 
 
  scanButton.disabled=false;volumeButton.disabled=false;nextButton.disabled=scanDone||totalSignals>=max;
 }
