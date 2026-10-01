@@ -898,7 +898,7 @@ async function scanOneBatch(){
 
   if(totalSignals>=max){scanDone=true;out.textContent+="\nMAX SIGNALS "+max+" DICAPAI.\nSCAN DIHENTIKAN.\n"}
   else if(d.done){scanDone=true;out.textContent+="\nSEMUA SUSUNAN SELESAI.\n"}
-  else {out.textContent+="\nBATCH INI SELESAI.\nTeruskan scan seterusnya...\n";await scanOneBatch();return;} oh
+  else {out.textContent+="\nBATCH INI SELESAI.\nTeruskan scan seterusnya...\n";await scanOneBatch();return;}
 
   out.textContent+="\n================================\nSIGNAL DIJUMPAI SETAKAT INI\n================================\n";
   if(allSignals.length)allSignals.forEach((s,i)=>out.textContent+=(i+1)+". "+s.symbol+" | "+s.date+" | RM "+price(s.close)+" | "+s.signal_name+"\n");
