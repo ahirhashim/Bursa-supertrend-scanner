@@ -496,6 +496,7 @@ def fetch_daily_volume_batch(symbols):
         payload = data.get("data", {})
         if not isinstance(payload, dict):
             return {"ok": False, "error": "Format data volume tidak dijangka.", "results": []}
+        print("BATCH PAYLOAD KEYS:", list(payload.keys()))
         break
     results = []
 
