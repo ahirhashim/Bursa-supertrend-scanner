@@ -533,7 +533,7 @@ def fetch_daily_volume_batch(symbols):
             "low": candle.get("l")
         })
 
-        return {"ok": True, "results": results}
+    return {"ok": True, "results": results}
 
     return {"ok": False, "error": "Batch volume request gagal.", "results": []}
 
