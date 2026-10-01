@@ -504,17 +504,12 @@ def fetch_daily_volume_batch(symbols):
 
         # Fallback jika batch tidak memulangkan candle
         if not candles:
-            single = fetch_kline(symbol, limit=1)
-
-            if single.get("ok") and single.get("candles"):
-                candles = single["candles"]
-            else:
-                results.append({
-                    "symbol": symbol,
-                    "ok": False,
-                    "error": single.get("error", "Tiada daily candle")
-                })
-                continue
+            results.append({
+                "symbol": symbol,
+                "ok": False,
+                "error": "Tiada daily candle dalam batch."
+            })
+            continue
 
         candle = max(candles, key=lambda x: float(x.get("t", 0)))
 
