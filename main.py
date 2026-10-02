@@ -491,7 +491,7 @@ def fetch_daily_volume_batch(symbols):
                         "results": []
                        }
 
-                   print("QUOTE RETRY:", attempt + 1)
+                   print("QUOTE RETRY TEST:", attempt + 1)
                    time.sleep(ITICK_REQUEST_DELAY)
                    continue
 
