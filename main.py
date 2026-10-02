@@ -568,22 +568,23 @@ def build_volume_ranking():
         if start + VOLUME_BATCH_SIZE < len(BURSA_UNIVERSE):
             time.sleep(ITICK_REQUEST_DELAY)
 
-    ranking = sorted(
-        all_results,
-        key=lambda x: float(x.get("volume", 0)),
-        reverse=True
-    )
+        ranking = sorted(
+            all_results,
+            key=lambda x: float(x.get("volume", 0)),
+            reverse=True
+        )
 
-    for index, item in enumerate(ranking, start=1):
-        item["rank"] = index
+        for index, item in enumerate(ranking, start=1):
+            item["rank"] = index
 
-    return {
-        "ok": True,
-        "count": len(ranking),
-        "ranking": ranking,
-        "error_count": len(errors),
-        "errors": errors
-    }
+        return {
+            "ok": True,
+            "count": len(ranking),
+            "ranking": ranking,
+            "error_count": len(errors),
+            "errors": errors
+        }
+    
 # ============================================================
 # SCANNER ENGINE
 # ============================================================
