@@ -18,7 +18,7 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 # ============================================================
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
-ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
+ITICK_BATCH_QUOTE_URL = "https://api-free.itick.org/stock/quotes"
 ITICK_REQUEST_DELAY = float(os.getenv("ITICK_REQUEST_DELAY", "20.0"))
 ITICK_MAX_RETRIES = 3
 
@@ -441,124 +441,105 @@ def calculate_symbol(symbol):
 # ============================================================
 # BATCH DAILY VOLUME
 # ============================================================
+
 def fetch_daily_volume_batch(symbols):
-    """Fetch latest daily OHLCV for up to 10 symbols in one iTick request."""
-    if not ITICK_API_KEY:
-        return {"ok": False, "error": "ITICK_API_KEY belum diset.", "results": []}
+    headers = {
+        "accept": "application/json",
+        "token": ITICK_API_KEY
+    }
 
-    symbols = [s for s in symbols if s in BURSA_UNIVERSE]
-    if not symbols:
-        return {"ok": True, "results": []}
-
-    headers = {"accept": "application/json", "token": ITICK_API_KEY}
     params = {
         "region": "MY",
         "exchange": "MYX",
-        "codes": ",".join(symbols),
-        "kType": 8,
-        "limit": 1
+        "codes": ",".join(symbols)
     }
 
-    for attempt in range(ITICK_MAX_RETRIES + 1):
-        wait_before_itick_request()
+    data = None
+
+    for attempt in range(ITICK_MAX_RETRIES):
         try:
             response = requests.get(
-                ITICK_BATCH_KLINE_URL,
-                params=params,
+                ITICK_BATCH_QUOTE_URL,
                 headers=headers,
-                timeout=20
+                params=params,
+                timeout=30
             )
-        except requests.RequestException as error:
-            return {"ok": False, "error": f"Batch volume request error: {error}", "results": []}
 
-        if response.status_code == 429:
-            if attempt >= ITICK_MAX_RETRIES:
-                return {"ok": False, "error": "HTTP 429 selepas retry.", "results": []}
-            retry_after = response.headers.get("Retry-After")
+            if response.status_code != 200:
+                return {
+                    "ok": False,
+                    "error": f"HTTP {response.status_code}",
+                    "results": []
+                }
+
             try:
-                sleep_seconds = float(retry_after) if retry_after else 2.0 * (2 ** attempt)
-            except Exception:
-                sleep_seconds = 2.0 * (2 ** attempt)
-            time.sleep(min(max(sleep_seconds, 2.0), 30.0))
-            continue
+                data = response.json()
+            except ValueError:
+                return {
+                    "ok": False,
+                    "error": "Batch quote response bukan JSON.",
+                    "results": []
+                }
 
-        if response.status_code != 200:
-            return {"ok": False, "error": f"HTTP {response.status_code}", "results": []}
+            if data.get("code") != 0:
+                return {
+                    "ok": False,
+                    "error": str(data),
+                    "results": []
+                }
 
-        try:
-            data = response.json()
-        except ValueError:
-            return {"ok": False, "error": "Batch volume response bukan JSON.", "results": []}
+            payload = data.get("data", {})
 
-        if data.get("code") != 0:
-            return {"ok": False, "error": str(data), "results": []}
+            if not isinstance(payload, dict):
+                return {
+                    "ok": False,
+                    "error": "Format data quote tidak dijangka.",
+                    "results": []
+                }
 
-        payload = data.get("data", {})
-        if not isinstance(payload, dict):
-            return {"ok": False, "error": "Format data volume tidak dijangka.", "results": []}
-        print("BATCH RESPONSE:", data)
-        print("BATCH PAYLOAD KEYS:", list(payload.keys()))
-        break
+            print("QUOTE RESPONSE:", data)
+            print("QUOTE PAYLOAD KEYS:", list(payload.keys()))
+
+            break
+
+        except Exception as exc:
+            if attempt == ITICK_MAX_RETRIES - 1:
+                return {
+                    "ok": False,
+                    "error": str(exc),
+                    "results": []
+                }
+
+            time.sleep(ITICK_REQUEST_DELAY)
+
     results = []
 
     for symbol in symbols:
-        candles = payload.get(symbol, [])
+        quote = payload.get(symbol)
 
-        # Fallback jika batch tidak memulangkan candle
-        if not candles:
+        if not quote:
             results.append({
                 "symbol": symbol,
                 "ok": False,
-                "error": "Tiada daily candle dalam batch."
+                "error": "Tiada quote dalam batch."
             })
             continue
 
-        candle = max(candles, key=lambda x: float(x.get("t", 0)))
-
         try:
-            volume = float(candle.get("v", 0) or 0)
+            volume = float(quote.get("v", 0) or 0)
         except Exception:
             volume = 0.0
 
         results.append({
             "symbol": symbol,
             "ok": True,
-            "date": format_timestamp(candle.get("t", 0)),
-            "volume": volume,
-            "close": candle.get("c"),
-            "high": candle.get("h"),
-            "low": candle.get("l")
+            "volume": volume
         })
 
-    return {"ok": True, "results": results}
-
-    return {"ok": False, "error": "Batch volume request gagal.", "results": []}
-
-
-def build_volume_ranking():
-    ranking = []
-    errors = []
-
-    for i in range(0, len(BURSA_UNIVERSE), VOLUME_BATCH_SIZE):
-        batch = BURSA_UNIVERSE[i:i + VOLUME_BATCH_SIZE]
-        result = fetch_daily_volume_batch(batch)
-
-        if not result.get("ok"):
-            errors.append({"symbols": batch, "error": result.get("error", "Unknown error")})
-            continue
-
-        for item in result.get("results", []):
-            if item.get("ok"):
-                ranking.append(item)
-            else:
-                errors.append({"symbol": item.get("symbol"), "error": item.get("error", "Unknown error")})
-
-    ranking.sort(key=lambda x: x.get("volume", 0), reverse=True)
-    for rank, item in enumerate(ranking, 1):
-        item["rank"] = rank
-
-    return {"ranking": ranking, "errors": errors}
-
+    return {
+        "ok": True,
+        "results": results
+    }
 # ============================================================
 # SCANNER ENGINE
 # ============================================================
