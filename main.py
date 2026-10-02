@@ -542,7 +542,8 @@ def fetch_daily_volume_batch(symbols):
         "ok": True,
         "results": results
     }
-    def build_volume_ranking():
+    
+def build_volume_ranking():
         all_results = []
         errors = []
 
