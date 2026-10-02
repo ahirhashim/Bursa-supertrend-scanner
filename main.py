@@ -464,6 +464,8 @@ def fetch_daily_volume_batch(symbols):
                 params=params,
                 timeout=30
             )
+            print("QUOTE HTTP STATUS:", response.status_code)
+            print("QUOTE RAW RESPONSE:", response.text[:1000])
 
             if response.status_code != 200:
                 return {
