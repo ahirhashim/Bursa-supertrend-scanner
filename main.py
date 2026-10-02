@@ -484,11 +484,16 @@ def fetch_daily_volume_batch(symbols):
                 }
 
             if data.get("code") != 0:
-                return {
-                    "ok": False,
-                    "error": str(data),
-                    "results": []
-                }
+                if attempt == ITICK_MAX_RETRIES - 1:
+                    return {
+                        "ok": False,
+                        "error": str(data),
+                        "results": []
+                       }
+
+                   print("QUOTE RETRY:", attempt + 1)
+                   time.sleep(ITICK_REQUEST_DELAY)
+                   continue
 
             payload = data.get("data", {})
 
