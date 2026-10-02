@@ -542,6 +542,46 @@ def fetch_daily_volume_batch(symbols):
         "ok": True,
         "results": results
     }
+    def build_volume_ranking():
+    all_results = []
+    errors = []
+
+    for start in range(0, len(BURSA_UNIVERSE), VOLUME_BATCH_SIZE):
+        batch = BURSA_UNIVERSE[start:start + VOLUME_BATCH_SIZE]
+
+        result = fetch_daily_volume_batch(batch)
+
+        if result.get("ok"):
+            for item in result.get("results", []):
+                if item.get("ok"):
+                    all_results.append(item)
+                else:
+                    errors.append(item)
+        else:
+            errors.append({
+                "batch": batch,
+                "error": result.get("error", "Unknown volume error")
+            })
+
+        if start + VOLUME_BATCH_SIZE < len(BURSA_UNIVERSE):
+            time.sleep(ITICK_REQUEST_DELAY)
+
+    ranking = sorted(
+        all_results,
+        key=lambda x: float(x.get("volume", 0)),
+        reverse=True
+    )
+
+    for index, item in enumerate(ranking, start=1):
+        item["rank"] = index
+
+    return {
+        "ok": True,
+        "count": len(ranking),
+        "ranking": ranking,
+        "error_count": len(errors),
+        "errors": errors
+    }
 # ============================================================
 # SCANNER ENGINE
 # ============================================================
