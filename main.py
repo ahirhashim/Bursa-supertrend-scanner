@@ -543,13 +543,14 @@ def fetch_daily_volume_batch(symbols):
         "results": results
     }
     def build_volume_ranking():
-    all_results = []
-    errors = []
+        all_results = []
+        errors = []
 
-    for start in range(0, len(BURSA_UNIVERSE), VOLUME_BATCH_SIZE):
-        batch = BURSA_UNIVERSE[start:start + VOLUME_BATCH_SIZE]
+        for start in range(0, len(BURSA_UNIVERSE), 
+    VOLUME_BATCH_SIZE):
+            batch = BURSA_UNIVERSE[start:start + VOLUME_BATCH_SIZE]
 
-        result = fetch_daily_volume_batch(batch)
+            result = fetch_daily_volume_batch(batch)
 
         if result.get("ok"):
             for item in result.get("results", []):
