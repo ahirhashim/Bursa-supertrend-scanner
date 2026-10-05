@@ -3,33 +3,26 @@ import time
 import threading
 import sqlite3
 import json
+import uuid
 from datetime import datetime, timezone, timedelta
 
 import requests
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-# ============================================================
-# APP
-# ============================================================
 app = FastAPI(title="Bursa Supertrend Scanner")
 
 # ============================================================
-# ITICK
+# ITICK - JANGAN UBAH LOGIK INI
 # ============================================================
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
-
-# iTick Base = 5 calls/minute.
-# 20 saat antara request memberi ruang yang lebih selamat.
-# PAKSA 20 SAAT ANTARA SETIAP REQUEST ITICK.
 ITICK_REQUEST_DELAY = 20.0
-
 ITICK_MAX_RETRIES = 0
 
 # ============================================================
-# SUPERTREND
+# SUPERTREND - LOCKED
 # ============================================================
 ATR_LENGTH = 10
 SUPERTREND_FACTOR = 1.0
@@ -37,7 +30,7 @@ SUPERTREND_FACTOR = 1.0
 # ============================================================
 # SCANNER
 # ============================================================
-DEFAULT_BATCH_SIZE = 5
+DEFAULT_BATCH_SIZE = 3
 RECENT_SIGNAL_DAYS = 5
 VOLUME_BATCH_SIZE = 10
 
@@ -46,17 +39,14 @@ VOLUME_BATCH_SIZE = 10
 # ============================================================
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 os.makedirs(DATA_DIR, exist_ok=True)
-
 DB_PATH = os.path.join(DATA_DIR, "recent_signals.db")
 _db_lock = threading.Lock()
+_job_thread_lock = threading.Lock()
+_job_threads = {}
 
 
 def get_db():
-    conn = sqlite3.connect(
-        DB_PATH,
-        timeout=30,
-        check_same_thread=False
-    )
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -64,7 +54,6 @@ def get_db():
 def init_database():
     with _db_lock:
         conn = get_db()
-
         conn.execute("""
             CREATE TABLE IF NOT EXISTS recent_signals (
                 symbol TEXT PRIMARY KEY,
@@ -77,7 +66,6 @@ def init_database():
                 expires_at TEXT NOT NULL
             )
         """)
-
         conn.execute("""
             CREATE TABLE IF NOT EXISTS volume_snapshot (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -85,7 +73,21 @@ def init_database():
                 ranking_json TEXT NOT NULL
             )
         """)
-
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                current_index INTEGER NOT NULL DEFAULT 0,
+                total INTEGER NOT NULL DEFAULT 0,
+                max_signals INTEGER NOT NULL DEFAULT 5,
+                results_json TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT,
+                updated_at TEXT NOT NULL,
+                finished_at TEXT,
+                message TEXT
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -95,55 +97,17 @@ init_database()
 # ============================================================
 # UNIVERSE
 # ============================================================
-TEST_SYMBOLS = [
-    "D&O",
-    "SRIDGE",
-    "DNEX",
-    "ZETRIX",
-    "INARI"
-]
-
+TEST_SYMBOLS = ["D&O", "SRIDGE", "DNEX", "ZETRIX", "INARI"]
 BURSA_UNIVERSE = [
-    "D&O",
-    "SRIDGE",
-    "DNEX",
-    "ZETRIX",
-    "INARI",
-    "FRONTKN",
-    "JCY",
-    "GREATEC",
-    "NOTION",
-    "SNS",
-    "VSTECS",
-    "AEMULUS",
-    "MICROLN",
-    "JHM",
-    "TOPGLOV",
-    "SUPERMX",
-    "HARTA",
-    "KOSSAN",
-    "DXN",
-    "ARMADA",
-    "VELESTO",
-    "CAPITALA",
-    "MRCB",
-    "BJCORP",
-    "TANCO",
-    "JAKS",
-    "WCT",
-    "IJM",
-    "MAHSING",
-    "TM",
-    "AXIATA",
-    "MAXIS",
-    "DIALOG",
-    "GENM",
-    "YTLPOWR",
-    "VS"
+    "D&O", "SRIDGE", "DNEX", "ZETRIX", "INARI", "FRONTKN", "JCY",
+    "GREATEC", "NOTION", "SNS", "VSTECS", "AEMULUS", "MICROLN", "JHM",
+    "TOPGLOV", "SUPERMX", "HARTA", "KOSSAN", "DXN", "ARMADA", "VELESTO",
+    "CAPITALA", "MRCB", "BJCORP", "TANCO", "JAKS", "WCT", "IJM", "MAHSING",
+    "TM", "AXIATA", "MAXIS", "DIALOG", "GENM", "YTLPOWR", "VS"
 ]
 
 # ============================================================
-# REQUEST PACING
+# TIME / PACING
 # ============================================================
 _itick_lock = threading.Lock()
 _last_itick_request = 0.0
@@ -151,24 +115,14 @@ _last_itick_request = 0.0
 
 def wait_before_itick_request():
     global _last_itick_request
-
     with _itick_lock:
         now = time.monotonic()
-
-        wait_time = (
-            ITICK_REQUEST_DELAY
-            - (now - _last_itick_request)
-        )
-
+        wait_time = ITICK_REQUEST_DELAY - (now - _last_itick_request)
         if wait_time > 0:
             time.sleep(wait_time)
-
         _last_itick_request = time.monotonic()
 
 
-# ============================================================
-# TIME
-# ============================================================
 def utc_now():
     return datetime.now(timezone.utc)
 
@@ -179,27 +133,15 @@ def iso_now():
 
 def malaysia_now_string():
     malaysia = timezone(timedelta(hours=8))
-    return datetime.now(malaysia).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    return datetime.now(malaysia).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def format_timestamp(timestamp):
     try:
-        dt = datetime.fromtimestamp(
-            float(timestamp) / 1000,
-            tz=timezone.utc
-        )
-
-        malaysia = dt.astimezone(
-            timezone(timedelta(hours=8))
-        )
-
-        return malaysia.strftime("%Y-%m-%d")
-
+        dt = datetime.fromtimestamp(float(timestamp) / 1000, tz=timezone.utc)
+        return dt.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
     except Exception:
         return str(timestamp)
-
 
 # ============================================================
 # RECENT SIGNALS
@@ -207,41 +149,21 @@ def format_timestamp(timestamp):
 def cleanup_expired_signals():
     with _db_lock:
         conn = get_db()
-
-        conn.execute(
-            "DELETE FROM recent_signals WHERE expires_at <= ?",
-            (iso_now(),)
-        )
-
+        conn.execute("DELETE FROM recent_signals WHERE expires_at <= ?", (iso_now(),))
         conn.commit()
         conn.close()
 
 
 def save_recent_signal(signal):
     cleanup_expired_signals()
-
     saved = utc_now()
-    expires = saved + timedelta(
-        days=RECENT_SIGNAL_DAYS
-    )
-
+    expires = saved + timedelta(days=RECENT_SIGNAL_DAYS)
     with _db_lock:
         conn = get_db()
-
         conn.execute("""
             INSERT INTO recent_signals
-            (
-                symbol,
-                signal_date,
-                close,
-                high,
-                low,
-                signal_name,
-                saved_at,
-                expires_at
-            )
+            (symbol, signal_date, close, high, low, signal_name, saved_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-
             ON CONFLICT(symbol) DO UPDATE SET
                 signal_date=excluded.signal_date,
                 close=excluded.close,
@@ -251,131 +173,170 @@ def save_recent_signal(signal):
                 saved_at=excluded.saved_at,
                 expires_at=excluded.expires_at
         """, (
-            signal.get("symbol"),
-            signal.get("date"),
-            signal.get("close"),
-            signal.get("high"),
-            signal.get("low"),
-            signal.get("signal_name"),
-            saved.isoformat(),
-            expires.isoformat()
+            signal.get("symbol"), signal.get("date"), signal.get("close"),
+            signal.get("high"), signal.get("low"), signal.get("signal_name"),
+            saved.isoformat(), expires.isoformat()
         ))
-
         conn.commit()
         conn.close()
 
 
 def get_recent_signals():
     cleanup_expired_signals()
-
     with _db_lock:
         conn = get_db()
-
         rows = conn.execute("""
-            SELECT
-                symbol,
-                signal_date,
-                close,
-                high,
-                low,
-                signal_name,
-                saved_at,
-                expires_at
-            FROM recent_signals
-            ORDER BY saved_at DESC
+            SELECT symbol, signal_date, close, high, low, signal_name, saved_at, expires_at
+            FROM recent_signals ORDER BY saved_at DESC
         """).fetchall()
-
         conn.close()
-
     return [dict(row) for row in rows]
 
 
 def get_recent_symbols():
-    return {
-        row["symbol"]
-        for row in get_recent_signals()
-    }
+    return {row["symbol"] for row in get_recent_signals()}
 
 
 def remove_recent_signal(symbol):
     with _db_lock:
         conn = get_db()
-
-        conn.execute(
-            "DELETE FROM recent_signals WHERE symbol = ?",
-            (symbol,)
-        )
-
+        conn.execute("DELETE FROM recent_signals WHERE symbol = ?", (symbol,))
         conn.commit()
         conn.close()
-
 
 # ============================================================
 # VOLUME SNAPSHOT
 # ============================================================
 def save_volume_snapshot(ranking):
     updated_at = malaysia_now_string()
-
     with _db_lock:
         conn = get_db()
-
         conn.execute("""
-            INSERT INTO volume_snapshot
-            (
-                id,
-                updated_at,
-                ranking_json
-            )
+            INSERT INTO volume_snapshot (id, updated_at, ranking_json)
             VALUES (1, ?, ?)
-
             ON CONFLICT(id) DO UPDATE SET
                 updated_at=excluded.updated_at,
                 ranking_json=excluded.ranking_json
-        """, (
-            updated_at,
-            json.dumps(ranking)
-        ))
-
+        """, (updated_at, json.dumps(ranking)))
         conn.commit()
         conn.close()
-
     return updated_at
 
 
 def get_volume_snapshot():
     with _db_lock:
         conn = get_db()
-
-        row = conn.execute("""
-            SELECT
-                updated_at,
-                ranking_json
-            FROM volume_snapshot
-            WHERE id = 1
-        """).fetchone()
-
+        row = conn.execute("SELECT updated_at, ranking_json FROM volume_snapshot WHERE id=1").fetchone()
         conn.close()
-
     if not row:
-        return {
-            "ok": False,
-            "updated_at": None,
-            "ranking": []
-        }
-
+        return {"ok": False, "updated_at": None, "ranking": []}
     try:
-        ranking = json.loads(
-            row["ranking_json"]
-        )
+        ranking = json.loads(row["ranking_json"])
     except Exception:
         ranking = []
+    return {"ok": True, "updated_at": row["updated_at"], "ranking": ranking}
 
-    return {
-        "ok": True,
-        "updated_at": row["updated_at"],
-        "ranking": ranking
-    }
+# ============================================================
+# JOB STORAGE
+# ============================================================
+def _job_default_results():
+    return {"signals": [], "errors": [], "skipped": [], "volume_results": []}
 
+
+def create_job(job_type, total, max_signals=5):
+    job_id = uuid.uuid4().hex[:12]
+    now = iso_now()
+    results = _job_default_results()
+    with _db_lock:
+        conn = get_db()
+        conn.execute("""
+            INSERT INTO jobs
+            (job_id, job_type, status, current_index, total, max_signals,
+             results_json, started_at, updated_at, message)
+            VALUES (?, ?, 'running', 0, ?, ?, ?, ?, ?, ?)
+        """, (job_id, job_type, total, max_signals, json.dumps(results), now, now, "Job dimulakan."))
+        conn.commit()
+        conn.close()
+    return job_id
+
+
+def get_job(job_id):
+    with _db_lock:
+        conn = get_db()
+        row = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        conn.close()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["results"] = json.loads(item.pop("results_json"))
+    except Exception:
+        item["results"] = _job_default_results()
+    return item
+
+
+def update_job(job_id, **fields):
+    if not fields:
+        return
+    fields["updated_at"] = iso_now()
+    if "results" in fields:
+        fields["results_json"] = json.dumps(fields.pop("results"))
+    assignments = ", ".join(f"{key}=?" for key in fields)
+    values = list(fields.values()) + [job_id]
+    with _db_lock:
+        conn = get_db()
+        conn.execute(f"UPDATE jobs SET {assignments} WHERE job_id=?", values)
+        conn.commit()
+        conn.close()
+
+
+def active_job():
+    with _db_lock:
+        conn = get_db()
+        row = conn.execute("""
+            SELECT job_id FROM jobs
+            WHERE status='running'
+            ORDER BY started_at DESC LIMIT 1
+        """).fetchone()
+        conn.close()
+    return get_job(row["job_id"]) if row else None
+
+
+def latest_resumable_job():
+    with _db_lock:
+        conn = get_db()
+        row = conn.execute("""
+            SELECT job_id FROM jobs
+            WHERE status IN ('interrupted', 'failed')
+            ORDER BY updated_at DESC LIMIT 1
+        """).fetchone()
+        conn.close()
+    return get_job(row["job_id"]) if row else None
+
+
+def mark_old_running_jobs_interrupted():
+    with _db_lock:
+        conn = get_db()
+        conn.execute("""
+            UPDATE jobs SET status='interrupted', message='Service restarted. Job boleh disambung.', updated_at=?
+            WHERE status='running'
+        """, (iso_now(),))
+        conn.commit()
+        conn.close()
+
+
+mark_old_running_jobs_interrupted()
+
+
+def start_thread(job_id, target):
+    with _job_thread_lock:
+        existing = _job_threads.get(job_id)
+        if existing and existing.is_alive():
+            return False
+        thread = threading.Thread(target=target, args=(job_id,), daemon=True)
+        _job_threads[job_id] = thread
+        thread.start()
+        return True
 
 # ============================================================
 # SUPERTREND ENGINE
@@ -383,2244 +344,487 @@ def get_volume_snapshot():
 def true_range(high, low, previous_close):
     if previous_close is None:
         return high - low
-
-    return max(
-        high - low,
-        abs(high - previous_close),
-        abs(low - previous_close)
-    )
+    return max(high-low, abs(high-previous_close), abs(low-previous_close))
 
 
-def calculate_supertrend(
-    candles,
-    atr_length=10,
-    factor=1.0
-):
+def calculate_supertrend(candles, atr_length=10, factor=1.0):
     if not candles:
         return []
-
     parsed = []
-
     for candle in candles:
         try:
             parsed.append({
-                "t": float(candle.get("t", 0)),
-                "o": float(candle.get("o", 0)),
-                "h": float(candle.get("h", 0)),
-                "l": float(candle.get("l", 0)),
-                "c": float(candle.get("c", 0)),
-                "v": candle.get("v", 0)
+                "t": float(candle.get("t", 0)), "o": float(candle.get("o", 0)),
+                "h": float(candle.get("h", 0)), "l": float(candle.get("l", 0)),
+                "c": float(candle.get("c", 0)), "v": candle.get("v", 0)
             })
-
         except Exception:
             continue
-
     if len(parsed) < atr_length:
         return []
-
     trs = []
-
     for i, candle in enumerate(parsed):
-        previous_close = (
-            parsed[i - 1]["c"]
-            if i > 0
-            else None
-        )
-
-        trs.append(
-            true_range(
-                candle["h"],
-                candle["l"],
-                previous_close
-            )
-        )
-
+        previous_close = parsed[i-1]["c"] if i > 0 else None
+        trs.append(true_range(candle["h"], candle["l"], previous_close))
     atr_values = [None] * len(parsed)
-
-    atr_values[atr_length - 1] = (
-        sum(trs[:atr_length])
-        / atr_length
-    )
-
-    for i in range(
-        atr_length,
-        len(trs)
-    ):
-        atr_values[i] = (
-            (
-                atr_values[i - 1]
-                * (atr_length - 1)
-            )
-            + trs[i]
-        ) / atr_length
-
+    atr_values[atr_length-1] = sum(trs[:atr_length]) / atr_length
+    for i in range(atr_length, len(trs)):
+        atr_values[i] = ((atr_values[i-1] * (atr_length-1)) + trs[i]) / atr_length
     result = []
-
     final_upper = None
     final_lower = None
     previous_direction = None
-
     for i, candle in enumerate(parsed):
-
         atr = atr_values[i]
-
         if atr is None:
-            result.append({
-                **candle,
-                "atr": None,
-                "supertrend": None,
-                "direction": None,
-                "flip": False,
-                "high_break": False,
-                "signal": 0,
-                "signal_name": "NONE"
-            })
-
+            result.append({**candle, "atr": None, "supertrend": None, "direction": None,
+                           "flip": False, "high_break": False, "signal": 0, "signal_name": "NONE"})
             continue
-
-        hl2 = (
-            candle["h"]
-            + candle["l"]
-        ) / 2.0
-
-        basic_upper = (
-            hl2
-            + factor * atr
-        )
-
-        basic_lower = (
-            hl2
-            - factor * atr
-        )
-
+        hl2 = (candle["h"] + candle["l"]) / 2.0
+        basic_upper = hl2 + factor * atr
+        basic_lower = hl2 - factor * atr
         if final_upper is None:
-            final_upper = basic_upper
-            final_lower = basic_lower
-
+            final_upper, final_lower = basic_upper, basic_lower
         else:
-            previous_close = parsed[i - 1]["c"]
-
-            previous_final_upper = final_upper
-            previous_final_lower = final_lower
-
-            if (
-                basic_upper < previous_final_upper
-                or previous_close > previous_final_upper
-            ):
-                final_upper = basic_upper
-            else:
-                final_upper = previous_final_upper
-
-            if (
-                basic_lower > previous_final_lower
-                or previous_close < previous_final_lower
-            ):
-                final_lower = basic_lower
-            else:
-                final_lower = previous_final_lower
-
+            previous_close = parsed[i-1]["c"]
+            previous_final_upper, previous_final_lower = final_upper, final_lower
+            final_upper = basic_upper if (basic_upper < previous_final_upper or previous_close > previous_final_upper) else previous_final_upper
+            final_lower = basic_lower if (basic_lower > previous_final_lower or previous_close < previous_final_lower) else previous_final_lower
         if previous_direction is None:
-            direction = (
-                1
-                if candle["c"] <= final_upper
-                else -1
-            )
-
+            direction = 1 if candle["c"] <= final_upper else -1
         elif previous_direction == 1:
-            direction = (
-                -1
-                if candle["c"] > final_upper
-                else 1
-            )
-
+            direction = -1 if candle["c"] > final_upper else 1
         else:
-            direction = (
-                1
-                if candle["c"] < final_lower
-                else -1
-            )
-
-        supertrend = (
-            final_lower
-            if direction < 0
-            else final_upper
-        )
-
-        flip = (
-            previous_direction is not None
-            and previous_direction > 0
-            and direction < 0
-        )
-
-        high_break = (
-            i > 0
-            and direction < 0
-            and candle["c"] > parsed[i - 1]["h"]
-        )
-
+            direction = 1 if candle["c"] < final_lower else -1
+        supertrend = final_lower if direction < 0 else final_upper
+        flip = previous_direction is not None and previous_direction > 0 and direction < 0
+        high_break = i > 0 and direction < 0 and candle["c"] > parsed[i-1]["h"]
         if flip and high_break:
-            signal = 3
-            signal_name = "FLIP + HIGH BREAK"
-
+            signal, signal_name = 3, "FLIP + HIGH BREAK"
         elif flip:
-            signal = 1
-            signal_name = "FLIP"
-
+            signal, signal_name = 1, "FLIP"
         elif high_break:
-            signal = 2
-            signal_name = "HIGH BREAK"
-
+            signal, signal_name = 2, "HIGH BREAK"
         else:
-            signal = 0
-            signal_name = "NONE"
-
-        result.append({
-            **candle,
-            "atr": atr,
-            "supertrend": supertrend,
-            "direction": direction,
-            "flip": flip,
-            "high_break": high_break,
-            "signal": signal,
-            "signal_name": signal_name
-        })
-
+            signal, signal_name = 0, "NONE"
+        result.append({**candle, "atr": atr, "supertrend": supertrend, "direction": direction,
+                       "flip": flip, "high_break": high_break, "signal": signal, "signal_name": signal_name})
         previous_direction = direction
-
     return result
 
 
 def format_result(candle):
     direction = candle.get("direction")
-
-    if direction == -1:
-        trend = "BULL"
-
-    elif direction == 1:
-        trend = "BEAR"
-
-    else:
-        trend = "NA"
-
+    trend = "BULL" if direction == -1 else "BEAR" if direction == 1 else "NA"
     return {
-        "date": format_timestamp(
-            candle.get("t", 0)
-        ),
-        "close": candle.get("c"),
-        "high": candle.get("h"),
-        "low": candle.get("l"),
-        "atr10": candle.get("atr"),
-        "supertrend": candle.get("supertrend"),
-        "direction": direction,
-        "trend": trend,
-        "flip": candle.get("flip", False),
-        "high_break": candle.get(
-            "high_break",
-            False
-        ),
-        "signal": candle.get(
-            "signal",
-            0
-        ),
-        "signal_name": candle.get(
-            "signal_name",
-            "NONE"
-        )
+        "date": format_timestamp(candle.get("t", 0)),
+        "close": candle.get("c"), "high": candle.get("h"), "low": candle.get("l"),
+        "atr10": candle.get("atr"), "supertrend": candle.get("supertrend"),
+        "direction": direction, "trend": trend, "flip": candle.get("flip", False),
+        "high_break": candle.get("high_break", False), "signal": candle.get("signal", 0),
+        "signal_name": candle.get("signal_name", "NONE")
     }
 
-
 # ============================================================
-# SINGLE STOCK KLINE
+# ITICK SINGLE KLINE
 # ============================================================
 def fetch_kline(symbol, limit=50):
-
     if not ITICK_API_KEY:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": "ITICK_API_KEY belum diset."
-        }
-
-    headers = {
-        "accept": "application/json",
-        "token": ITICK_API_KEY
-    }
-
-    params = {
-        "region": "MY",
-        "exchange": "MYX",
-        "code": symbol,
-        "kType": 8,
-        "limit": limit
-    }
-
+        return {"ok": False, "symbol": symbol, "error": "ITICK_API_KEY belum diset."}
+    headers = {"accept": "application/json", "token": ITICK_API_KEY}
+    params = {"region": "MY", "exchange": "MYX", "code": symbol, "kType": 8, "limit": limit}
     wait_before_itick_request()
-
     try:
-        response = requests.get(
-            ITICK_KLINE_URL,
-            params=params,
-            headers=headers,
-            timeout=30
-        )
-
+        response = requests.get(ITICK_KLINE_URL, params=params, headers=headers, timeout=30)
     except requests.RequestException as error:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": (
-                f"K-line request error: {error}"
-            )
-        }
-
+        return {"ok": False, "symbol": symbol, "error": f"K-line request error: {error}"}
     if response.status_code == 429:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": "HTTP 429 - iTick rate limit."
-        }
-
+        return {"ok": False, "symbol": symbol, "error": "HTTP 429 - iTick rate limit."}
     if response.status_code != 200:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": (
-                f"HTTP {response.status_code}"
-            )
-        }
-
+        return {"ok": False, "symbol": symbol, "error": f"HTTP {response.status_code}"}
     try:
         data = response.json()
-
     except ValueError:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": "K-line response bukan JSON."
-        }
-
+        return {"ok": False, "symbol": symbol, "error": "K-line response bukan JSON."}
     if data.get("code") != 0:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": str(data)
-        }
-
+        return {"ok": False, "symbol": symbol, "error": str(data)}
     raw = data.get("data", [])
-
     if not isinstance(raw, list):
         raw = []
-
     if not raw:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": "Tiada daily candle."
-        }
-
+        return {"ok": False, "symbol": symbol, "error": "Tiada daily candle."}
     try:
-        raw = sorted(
-            raw,
-            key=lambda x: float(
-                x.get("t", 0)
-            )
-        )
-
+        raw = sorted(raw, key=lambda x: float(x.get("t", 0)))
     except Exception:
         pass
-
-    return {
-        "ok": True,
-        "symbol": symbol,
-        "candles": raw
-    }
+    return {"ok": True, "symbol": symbol, "candles": raw}
 
 
 def calculate_symbol(symbol):
-
-    fetched = fetch_kline(
-        symbol,
-        50
-    )
-
+    fetched = fetch_kline(symbol, 50)
     if not fetched.get("ok"):
         return fetched
-
-    calculated = calculate_supertrend(
-        fetched["candles"],
-        ATR_LENGTH,
-        SUPERTREND_FACTOR
-    )
-
+    calculated = calculate_supertrend(fetched["candles"], ATR_LENGTH, SUPERTREND_FACTOR)
     if not calculated:
-        return {
-            "ok": False,
-            "symbol": symbol,
-            "error": (
-                "Supertrend calculation gagal."
-            )
-        }
-
+        return {"ok": False, "symbol": symbol, "error": "Supertrend calculation gagal."}
     latest = calculated[-1]
-
-    historical_signals = [
-        format_result(c)
-        for c in calculated
-        if c.get("signal", 0) != 0
-    ]
-
     return {
-        "ok": True,
-        "symbol": symbol,
-        "latest": format_result(latest),
-        "historical_signals": historical_signals
+        "ok": True, "symbol": symbol, "latest": format_result(latest),
+        "historical_signals": [format_result(c) for c in calculated if c.get("signal", 0) != 0]
     }
-
 
 # ============================================================
 # DAILY VOLUME
 # ============================================================
 def fetch_daily_volume_batch(symbols):
-
     if not ITICK_API_KEY:
-        return {
-            "ok": False,
-            "error": "ITICK_API_KEY belum diset.",
-            "results": []
-        }
-
+        return {"ok": False, "error": "ITICK_API_KEY belum diset.", "results": []}
     results = []
-
-    # Gunakan endpoint single daily K-line
-    # kerana batch K-line memulangkan data kosong
-    # untuk kaunter Bursa pada endpoint free.
-    #
-    # fetch_kline() sudah menggunakan:
-    # - /stock/kline
-    # - kType = 8 (Daily)
-    # - pacing 20 saat antara request
-
     for symbol in symbols:
-
-        print(
-            "VOLUME SINGLE KLINE:",
-            symbol
-        )
-
-        fetched = fetch_kline(
-            symbol,
-            limit=1
-        )
-
+        print("VOLUME SINGLE KLINE:", symbol, flush=True)
+        fetched = fetch_kline(symbol, limit=1)
         if not fetched.get("ok"):
-            results.append({
-                "symbol": symbol,
-                "ok": False,
-                "error": fetched.get(
-                    "error",
-                    "Gagal mendapatkan daily candle."
-                )
-            })
+            results.append({"symbol": symbol, "ok": False, "error": fetched.get("error", "Gagal mendapatkan daily candle.")})
             continue
-
-        candles = fetched.get(
-            "candles",
-            []
-        )
-
+        candles = fetched.get("candles", [])
         if not candles:
-            results.append({
-                "symbol": symbol,
-                "ok": False,
-                "error": "Tiada daily candle."
-            })
+            results.append({"symbol": symbol, "ok": False, "error": "Tiada daily candle."})
             continue
-
         try:
-            latest = max(
-                candles,
-                key=lambda x: float(
-                    x.get("t", 0) or 0
-                )
-            )
-
-            volume = float(
-                latest.get("v", 0) or 0
-            )
-
+            latest = max(candles, key=lambda x: float(x.get("t", 0) or 0))
+            volume = float(latest.get("v", 0) or 0)
         except Exception as error:
-            results.append({
-                "symbol": symbol,
-                "ok": False,
-                "error": str(error)
-            })
+            results.append({"symbol": symbol, "ok": False, "error": str(error)})
             continue
-
-        results.append({
-            "symbol": symbol,
-            "ok": True,
-            "volume": volume
-        })
-
-    return {
-        "ok": True,
-        "results": results
-    }
-
+        results.append({"symbol": symbol, "ok": True, "volume": volume})
+    return {"ok": True, "results": results}
 
 # ============================================================
-# BUILD NEW VOLUME SNAPSHOT
+# BACKGROUND VOLUME JOB
 # ============================================================
-def build_volume_ranking():
+def run_volume_job(job_id):
+    try:
+        job = get_job(job_id)
+        if not job:
+            return
+        results = job["results"]
+        volume_results = results.get("volume_results", [])
+        errors = results.get("errors", [])
+        universe = BURSA_UNIVERSE
+        start = job["current_index"]
+        total = len(universe)
+        update_job(job_id, status="running", total=total, message="Mengambil Daily Volume...", results=results)
+        while start < total:
+            symbol = universe[start]
+            result = fetch_daily_volume_batch([symbol])
+            item = result.get("results", [{}])[0] if result.get("results") else {"symbol": symbol, "ok": False, "error": result.get("error", "Unknown error")}
+            if item.get("ok"):
+                volume_results.append(item)
+            else:
+                errors.append(item)
+            start += 1
+            results["volume_results"] = volume_results
+            results["errors"] = errors
+            update_job(job_id, current_index=start, total=total,
+                       message=f"Volume {start}/{total}: {symbol}", results=results)
+        ranking = sorted(volume_results, key=lambda x: float(x.get("volume", 0)), reverse=True)
+        for index, item in enumerate(ranking, start=1):
+            item["rank"] = index
+        updated_at = save_volume_snapshot(ranking) if ranking else None
+        results["ranking"] = ranking
+        results["updated_at"] = updated_at
+        update_job(job_id, status="completed" if ranking else "failed", current_index=total,
+                   message=f"Selesai: {len(ranking)}/{total} kaunter.", results=results, finished_at=iso_now())
+    except Exception as error:
+        print("VOLUME JOB ERROR:", repr(error), flush=True)
+        job = get_job(job_id)
+        results = job["results"] if job else _job_default_results()
+        update_job(job_id, status="failed", message=f"Volume job error: {error}", results=results, finished_at=iso_now())
 
-    all_results = []
-    errors = []
-
-    volume_universe = BURSA_UNIVERSE
-    total = len(volume_universe)
-    
-
-    for start in range(
-        0,
-        total,
-        VOLUME_BATCH_SIZE
-    ):
-
-        batch = volume_universe[
-            start:start + VOLUME_BATCH_SIZE 
-        ]
-        
-        print(
-            "VOLUME BATCH:",
-            start,
-            "->",
-            start + len(batch)
-        )
-
-        result = fetch_daily_volume_batch(
-            batch
-        )
-
-        if result.get("ok"):
-
-            for item in result.get(
-                "results",
-                []
-            ):
-
-                if item.get("ok"):
-                    all_results.append(item)
-
-                else:
-                    errors.append(item)
-
+# ============================================================
+# BACKGROUND SCAN JOBS
+# ============================================================
+def run_scan_job(job_id):
+    try:
+        job = get_job(job_id)
+        if not job:
+            return
+        results = job["results"]
+        signals = results.get("signals", [])
+        errors = results.get("errors", [])
+        skipped = results.get("skipped", [])
+        job_type = job["job_type"]
+        if job_type == "saved_volume_scan":
+            snapshot = get_volume_snapshot()
+            symbols = [x.get("symbol") for x in snapshot["ranking"] if x.get("symbol")]
         else:
-            errors.append({
-                "batch": batch,
-                "error": result.get(
-                    "error",
-                    "Unknown volume error"
-                )
-            })
-
-    ranking = sorted(
-        all_results,
-        key=lambda x: float(
-            x.get("volume", 0)
-        ),
-        reverse=True
-    )
-
-    for index, item in enumerate(
-        ranking,
-        start=1
-    ):
-        item["rank"] = index
-
-    updated_at = None
-
-    if ranking:
-        updated_at = save_volume_snapshot(
-            ranking
-        )
-
-    return {
-        "ok": bool(ranking),
-        "count": len(ranking),
-        "ranking": ranking,
-        "updated_at": updated_at,
-        "error_count": len(errors),
-        "errors": errors
-    }
-
+            symbols = BURSA_UNIVERSE
+        total = len(symbols)
+        start = job["current_index"]
+        max_signals = max(1, job["max_signals"])
+        update_job(job_id, total=total, status="running", message="Scan sedang berjalan...", results=results)
+        while start < total and len(signals) < max_signals:
+            symbol = symbols[start]
+            recent_symbols = get_recent_symbols()
+            if symbol in recent_symbols:
+                skipped.append({"symbol": symbol, "reason": "RECENT SIGNAL"})
+            else:
+                result = calculate_symbol(symbol)
+                if not result.get("ok"):
+                    errors.append({"symbol": symbol, "error": result.get("error", "Unknown error")})
+                else:
+                    latest = result.get("latest", {})
+                    if latest.get("signal", 0) != 0:
+                        signal = {"symbol": symbol, **latest}
+                        signals.append(signal)
+                        save_recent_signal(signal)
+            start += 1
+            results.update({"signals": signals, "errors": errors, "skipped": skipped})
+            update_job(job_id, current_index=start, total=total, max_signals=max_signals,
+                       message=f"Scan {start}/{total}: {symbol} | Signal {len(signals)}/{max_signals}", results=results)
+        done = start >= total or len(signals) >= max_signals
+        status = "completed" if done else "running"
+        update_job(job_id, status=status, current_index=start, total=total,
+                   message=f"Selesai: {len(signals)} signal, {start}/{total} kaunter.",
+                   results=results, finished_at=iso_now() if done else None)
+    except Exception as error:
+        print("SCAN JOB ERROR:", repr(error), flush=True)
+        job = get_job(job_id)
+        results = job["results"] if job else _job_default_results()
+        update_job(job_id, status="failed", message=f"Scan job error: {error}", results=results, finished_at=iso_now())
 
 # ============================================================
-# SCANNER ENGINE
+# RESCAN JOB
 # ============================================================
-def scan_symbols(
-    symbols,
-    start=0,
-    batch_size=5
-):
+def run_rescan_job(job_id):
+    try:
+        job = get_job(job_id)
+        saved = get_recent_signals()
+        results = job["results"]
+        output = results.get("rescan", [])
+        errors = results.get("errors", [])
+        start = job["current_index"]
+        total = len(saved)
+        while start < total:
+            item = saved[start]
+            symbol = item["symbol"]
+            result = calculate_symbol(symbol)
+            if not result.get("ok"):
+                errors.append({"symbol": symbol, "error": result.get("error", "Unknown error")})
+            else:
+                latest = result.get("latest", {})
+                if latest.get("signal", 0) != 0:
+                    signal = {"symbol": symbol, **latest}
+                    save_recent_signal(signal)
+                    output.append({"symbol": symbol, "status": "SIGNAL STILL ACTIVE", "signal": signal})
+                else:
+                    remove_recent_signal(symbol)
+                    output.append({"symbol": symbol, "status": "SIGNAL CLEARED"})
+            start += 1
+            results.update({"rescan": output, "errors": errors})
+            update_job(job_id, current_index=start, total=total,
+                       message=f"Rescan {start}/{total}: {symbol}", results=results)
+        update_job(job_id, status="completed", current_index=total, total=total,
+                   message=f"Rescan selesai: {total} saved signal.", results=results, finished_at=iso_now())
+    except Exception as error:
+        print("RESCAN JOB ERROR:", repr(error), flush=True)
+        job = get_job(job_id)
+        results = job["results"] if job else _job_default_results()
+        update_job(job_id, status="failed", message=f"Rescan job error: {error}", results=results, finished_at=iso_now())
 
-    symbols = [
-        s
-        for s in symbols
-        if s in BURSA_UNIVERSE
-    ]
-
-    end = min(
-        start + batch_size,
-        len(symbols)
-    )
-
-    batch = symbols[start:end]
-
-    recent_symbols = get_recent_symbols()
-
-    scanner = []
-    errors = []
-    skipped = []
-
-    for symbol in batch:
-
-        if symbol in recent_symbols:
-
-            skipped.append({
-                "symbol": symbol,
-                "reason": "RECENT SIGNAL"
-            })
-
-            continue
-
-        result = calculate_symbol(
-            symbol
-        )
-
-        if not result.get("ok"):
-
-            errors.append({
-                "symbol": symbol,
-                "error": result.get(
-                    "error",
-                    "Unknown error"
-                )
-            })
-
-            continue
-
-        latest = result.get(
-            "latest",
-            {}
-        )
-
-        if latest.get(
-            "signal",
-            0
-        ) != 0:
-
-            signal = {
-                "symbol": symbol,
-                **latest
-            }
-
-            scanner.append(signal)
-
-            save_recent_signal(
-                signal
-            )
-
-    return {
-        "start": start,
-        "end": end,
-        "batch_size": len(batch),
-        "requested_count": len(symbols),
-        "scanned_count": end,
-        "remaining_count": (
-            len(symbols) - end
-        ),
-        "done": (
-            end >= len(symbols)
-        ),
-        "scanner": scanner,
-        "signals_only": scanner.copy(),
-        "skipped_count": len(skipped),
-        "skipped": skipped,
-        "error_count": len(errors),
-        "errors": errors
-    }
-
+# ============================================================
+# JOB START / RESUME HELPERS
+# ============================================================
+def start_or_resume_job(job_type, total, max_signals=5, resume_job_id=None):
+    if resume_job_id:
+        job = get_job(resume_job_id)
+        if not job or job["status"] not in ("interrupted", "failed"):
+            return None, "Job tidak boleh disambung."
+        update_job(resume_job_id, status="running", message="Job disambung...")
+        job_id = resume_job_id
+    else:
+        existing = active_job()
+        if existing:
+            return existing["job_id"], "Job sedang berjalan."
+        job_id = create_job(job_type, total, max_signals)
+    if job_type == "volume_update":
+        start_thread(job_id, run_volume_job)
+    elif job_type in ("saved_volume_scan", "universe_scan"):
+        start_thread(job_id, run_scan_job)
+    elif job_type == "rescan_saved":
+        start_thread(job_id, run_rescan_job)
+    return job_id, None
 
 # ============================================================
 # API
 # ============================================================
 @app.get("/api/health")
 def health():
-    return {
-        "ok": True,
-        "service": (
-            "bursa-supertrend-scanner"
-        )
-    }
+    return {"ok": True, "service": "bursa-supertrend-scanner"}
 
 
 @app.get("/api/recent-signals")
 def recent_signals():
-
     signals = get_recent_signals()
-
-    return {
-        "ok": True,
-        "days": RECENT_SIGNAL_DAYS,
-        "count": len(signals),
-        "signals": signals
-    }
+    return {"ok": True, "days": RECENT_SIGNAL_DAYS, "count": len(signals), "signals": signals}
 
 
-# ------------------------------------------------------------
-# READ SAVED VOLUME
-# ------------------------------------------------------------
 @app.get("/api/volume-ranking")
 def volume_ranking():
-
     snapshot = get_volume_snapshot()
-
-    return {
-        "ok": snapshot["ok"],
-        "count": len(
-            snapshot["ranking"]
-        ),
-        "updated_at": snapshot[
-            "updated_at"
-        ],
-        "ranking": snapshot[
-            "ranking"
-        ],
-        "errors": []
-    }
+    return {"ok": snapshot["ok"], "count": len(snapshot["ranking"]),
+            "updated_at": snapshot["updated_at"], "ranking": snapshot["ranking"], "errors": []}
 
 
-# ------------------------------------------------------------
-# MANUAL UPDATE DAILY VOLUME
-# ------------------------------------------------------------
+@app.get("/api/job-status")
+def job_status(job_id: str = ""):
+    job = get_job(job_id) if job_id else active_job()
+    if not job:
+        job = latest_resumable_job()
+    return {"ok": bool(job), "job": job}
+
+
+@app.get("/api/jobs")
+def jobs():
+    with _db_lock:
+        conn = get_db()
+        rows = conn.execute("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT 10").fetchall()
+        conn.close()
+    output = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["results"] = json.loads(item.pop("results_json"))
+        except Exception:
+            item["results"] = _job_default_results()
+        output.append(item)
+    return {"ok": True, "jobs": output}
+
+
 @app.get("/api/update-volume")
 def update_volume():
-
-    result = build_volume_ranking()
-
-    return {
-        "ok": result["ok"],
-        "count": result["count"],
-        "updated_at": result[
-            "updated_at"
-        ],
-        "ranking": result[
-            "ranking"
-        ],
-        "error_count": result[
-            "error_count"
-        ],
-        "errors": result[
-            "errors"
-        ]
-    }
+    job_id, note = start_or_resume_job("volume_update", len(BURSA_UNIVERSE), 0)
+    return {"ok": True, "started": True, "job_id": job_id, "message": note or "Update Daily Volume dimulakan."}
 
 
-# ------------------------------------------------------------
-# NORMAL UNIVERSE SCAN
-# ------------------------------------------------------------
-@app.get("/api/test/universe")
-def test_universe(
-    start: int = 0,
-    batch_size: int = DEFAULT_BATCH_SIZE
-):
-
-    if start < 0:
-        start = 0
-
-    batch_size = min(
-        max(batch_size, 1),
-        10
-    )
-
-    return scan_symbols(
-        BURSA_UNIVERSE,
-        start,
-        batch_size
-    )
+@app.get("/api/update-volume/resume")
+def resume_volume(job_id: str):
+    job_id, note = start_or_resume_job("volume_update", len(BURSA_UNIVERSE), 0, job_id)
+    if not job_id:
+        return {"ok": False, "error": note}
+    return {"ok": True, "job_id": job_id, "message": note or "Volume job disambung."}
 
 
-# ------------------------------------------------------------
-# SCAN SAVED VOLUME
-# ------------------------------------------------------------
-@app.get("/api/test/volume-scan")
-def volume_scan(
-    start: int = 0,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    symbols: str = ""
-):
-
-    if symbols.strip():
-
-        ordered = [
-            s.strip().upper()
-            for s in symbols.split(",")
-            if s.strip()
-        ]
-
-        ordered = [
-            s
-            for s in ordered
-            if s in BURSA_UNIVERSE
-        ]
-
-    else:
-
-        snapshot = get_volume_snapshot()
-
-        ordered = [
-            item["symbol"]
-            for item in snapshot[
-                "ranking"
-            ]
-            if item.get("symbol")
-        ]
-
-    if not ordered:
-        return {
-            "ok": False,
-            "error": (
-                "Belum ada Daily Volume "
-                "snapshot. Tekan UPDATE DAILY VOLUME dahulu."
-            ),
-            "scanner": []
-        }
-
-    batch_size = min(
-        max(batch_size, 1),
-        10
-    )
-
-    return scan_symbols(
-        ordered,
-        start,
-        batch_size
-    )
+@app.get("/api/test/universe/start")
+def start_universe_scan(max_signals: int = 5):
+    max_signals = min(max(max_signals, 1), 20)
+    job_id, note = start_or_resume_job("universe_scan", len(BURSA_UNIVERSE), max_signals)
+    return {"ok": True, "job_id": job_id, "message": note or "Universe scan dimulakan."}
 
 
-# ------------------------------------------------------------
-# RESCAN SAVED
-# ------------------------------------------------------------
-@app.get("/api/rescan-saved")
-def rescan_saved():
+@app.get("/api/test/volume-scan/start")
+def start_volume_scan(max_signals: int = 5):
+    snapshot = get_volume_snapshot()
+    if not snapshot["ranking"]:
+        return {"ok": False, "error": "Belum ada Daily Volume snapshot. Tekan UPDATE DAILY VOLUME dahulu."}
+    max_signals = min(max(max_signals, 1), 20)
+    job_id, note = start_or_resume_job("saved_volume_scan", len(snapshot["ranking"]), max_signals)
+    return {"ok": True, "job_id": job_id, "message": note or "Saved Volume scan dimulakan."}
 
+
+@app.get("/api/rescan-saved/start")
+def start_rescan_saved():
     saved = get_recent_signals()
-
-    results = []
-    errors = []
-
-    for item in saved:
-
-        symbol = item["symbol"]
-
-        result = calculate_symbol(
-            symbol
-        )
-
-        if not result.get("ok"):
-
-            errors.append({
-                "symbol": symbol,
-                "error": result.get(
-                    "error",
-                    "Unknown error"
-                )
-            })
-
-            continue
-
-        latest = result.get(
-            "latest",
-            {}
-        )
-
-        if latest.get(
-            "signal",
-            0
-        ) != 0:
-
-            signal = {
-                "symbol": symbol,
-                **latest
-            }
-
-            save_recent_signal(
-                signal
-            )
-
-            results.append({
-                "symbol": symbol,
-                "status": (
-                    "SIGNAL STILL ACTIVE"
-                ),
-                "signal": signal
-            })
-
-        else:
-
-            remove_recent_signal(
-                symbol
-            )
-
-            results.append({
-                "symbol": symbol,
-                "status": (
-                    "SIGNAL CLEARED"
-                )
-            })
-
-    return {
-        "ok": True,
-        "rescanned_count": len(saved),
-        "results": results,
-        "error_count": len(errors),
-        "errors": errors,
-        "recent_signals": (
-            get_recent_signals()
-        )
-    }
+    if not saved:
+        return {"ok": False, "error": "Tiada Recent Signal untuk di-rescan."}
+    job_id, note = start_or_resume_job("rescan_saved", len(saved), 0)
+    return {"ok": True, "job_id": job_id, "message": note or "Rescan dimulakan."}
 
 
-# ------------------------------------------------------------
-# TEST
-# ------------------------------------------------------------
+@app.get("/api/job-resume")
+def resume_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "Job tidak dijumpai."}
+    if job["job_type"] == "volume_update":
+        new_id, note = start_or_resume_job(job["job_type"], len(BURSA_UNIVERSE), 0, job_id)
+    elif job["job_type"] in ("saved_volume_scan", "universe_scan"):
+        new_id, note = start_or_resume_job(job["job_type"], job["total"], job["max_signals"], job_id)
+    elif job["job_type"] == "rescan_saved":
+        new_id, note = start_or_resume_job(job["job_type"], job["total"], 0, job_id)
+    else:
+        return {"ok": False, "error": "Jenis job tidak disokong."}
+    if not new_id:
+        return {"ok": False, "error": note}
+    return {"ok": True, "job_id": new_id}
+
+# ============================================================
+# LEGACY TEST ENDPOINTS - KEKAL UNTUK DEBUG
+# ============================================================
 @app.get("/api/test/5")
 def test_five():
-
-    return {
-        "requested_count": len(
-            TEST_SYMBOLS
-        ),
-        "results": [
-            calculate_symbol(s)
-            for s in TEST_SYMBOLS
-        ]
-    }
+    return {"requested_count": len(TEST_SYMBOLS), "results": [calculate_symbol(s) for s in TEST_SYMBOLS]}
 
 
 @app.get("/api/test/history")
 def test_history():
-
     results = []
-
     for symbol in TEST_SYMBOLS:
-
-        result = calculate_symbol(
-            symbol
-        )
-
-        if result.get("ok"):
-
-            results.append({
-                "symbol": symbol,
-                "historical_signals":
-                    result.get(
-                        "historical_signals",
-                        []
-                    )
-            })
-
-        else:
-            results.append(result)
-
-    return {
-        "results": results
-    }
-
+        result = calculate_symbol(symbol)
+        results.append({"symbol": symbol, "historical_signals": result.get("historical_signals", [])} if result.get("ok") else result)
+    return {"results": results}
 
 # ============================================================
 # HOME PAGE
 # ============================================================
-@app.get(
-    "/",
-    response_class=HTMLResponse
-)
+@app.get("/", response_class=HTMLResponse)
 def home():
-
-    return r'''
-<!DOCTYPE html>
+    return r'''<!DOCTYPE html>
 <html>
-
 <head>
-
-<meta
-name="viewport"
-content="width=device-width, initial-scale=1.0"
->
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bursa Supertrend Scanner</title>
-
 <style>
-
-body{
-    margin:0;
-    padding:20px;
-    background:#101010;
-    color:#eeeeee;
-    font-family:Arial,sans-serif
-}
-
-.container{
-    max-width:900px;
-    margin:auto
-}
-
-h1{
-    margin-bottom:5px;
-    font-size:24px
-}
-
-.subtitle{
-    color:#999999;
-    margin-bottom:20px
-}
-
-button{
-    width:100%;
-    padding:14px;
-    margin-top:10px;
-    border:none;
-    border-radius:8px;
-    background:#1f8f4d;
-    color:white;
-    font-size:16px;
-    font-weight:bold
-}
-
-button:disabled{
-    opacity:.5
-}
-
-.secondary{
-    background:#333333
-}
-
-.danger{
-    background:#7b3030
-}
-
-.volume{
-    background:#1769aa
-}
-
-input{
-    width:100%;
-    box-sizing:border-box;
-    padding:12px;
-    margin-top:8px;
-    margin-bottom:8px;
-    border-radius:8px;
-    border:1px solid #444;
-    background:#181818;
-    color:white;
-    font-size:16px
-}
-
-label{
-    display:block;
-    margin-top:15px;
-    color:#cccccc
-}
-
-pre{
-    margin-top:20px;
-    padding:15px;
-    background:#181818;
-    border-radius:8px;
-    overflow-x:auto;
-    white-space:pre-wrap;
-    word-break:break-word;
-    font-size:13px
-}
-
-.card{
-    margin-top:20px;
-    padding:15px;
-    background:#181818;
-    border-radius:10px
-}
-
-.card-title{
-    font-size:18px;
-    font-weight:bold;
-    margin-bottom:10px
-}
-
-.info{
-    margin-top:15px;
-    padding:12px;
-    background:#181818;
-    border-radius:8px;
-    color:#bbbbbb;
-    font-size:13px
-}
-
-.signal{
-    padding:12px;
-    margin-top:8px;
-    border-radius:8px;
-    background:#222222;
-    border-left:4px solid #1f8f4d
-}
-
-.signal-title{
-    font-size:16px;
-    font-weight:bold
-}
-
-.signal-detail{
-    color:#bbbbbb;
-    margin-top:5px;
-    font-size:13px
-}
-
-.rank{
-    padding:9px;
-    margin-top:5px;
-    background:#222222;
-    border-radius:7px;
-    font-size:13px
-}
-
-.empty{
-    color:#888888;
-    font-size:14px
-}
-
+body{margin:0;padding:20px;background:#101010;color:#eee;font-family:Arial,sans-serif}.container{max-width:900px;margin:auto}h1{margin-bottom:5px;font-size:24px}.subtitle{color:#999;margin-bottom:20px}button{width:100%;padding:14px;margin-top:10px;border:0;border-radius:8px;background:#1f8f4d;color:#fff;font-size:16px;font-weight:bold}button:disabled{opacity:.5}.secondary{background:#333}.danger{background:#7b3030}.volume{background:#1769aa}input{width:100%;box-sizing:border-box;padding:12px;margin-top:8px;margin-bottom:8px;border-radius:8px;border:1px solid #444;background:#181818;color:#fff;font-size:16px}.card{margin-top:20px;padding:15px;background:#181818;border-radius:10px}.card-title{font-size:18px;font-weight:bold;margin-bottom:10px}.info{margin-top:15px;padding:12px;background:#181818;border-radius:8px;color:#bbb;font-size:13px}pre{margin-top:20px;padding:15px;background:#181818;border-radius:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;font-size:13px}.signal{padding:12px;margin-top:8px;border-radius:8px;background:#222;border-left:4px solid #1f8f4d}.signal-title{font-size:16px;font-weight:bold}.signal-detail{color:#bbb;margin-top:5px;font-size:13px}.rank{padding:9px;margin-top:5px;background:#222;border-radius:7px;font-size:13px}.progress{margin-top:10px;padding:12px;background:#222;border-radius:8px}.bar{height:10px;background:#333;border-radius:5px;overflow:hidden;margin-top:8px}.fill{height:100%;background:#1f8f4d;width:0}.small{font-size:12px;color:#aaa;margin-top:7px}
 </style>
-
 </head>
-
 <body>
-
 <div class="container">
+<h1>BURSA SUPERTREND SCANNER</h1>
+<div class="subtitle">Bursa Universe • Daily • ATR 10 / Factor 1.0</div>
 
-<h1>
-BURSA SUPERTREND SCANNER
-</h1>
+<div class="card"><div class="card-title">RECENT SIGNALS</div><div id="recentSignals">Loading...</div><button class="secondary" onclick="loadRecentSignals()">REFRESH RECENT SIGNALS</button><button class="danger" id="rescanButton" onclick="startRescan()">RESCAN SAVED</button></div>
 
-<div class="subtitle">
-Bursa Universe • Daily • ATR 10 / Factor 1.0
+<div class="card"><div class="card-title">DAILY VOLUME SNAPSHOT</div><button class="volume" id="updateVolumeButton" onclick="startVolumeUpdate()">UPDATE DAILY VOLUME</button><div id="volumeStatus" class="info">Belum ada Daily Volume snapshot.</div><div id="volumeList"></div></div>
+
+<div class="card"><div class="card-title">SCAN SAVED VOLUME</div><label>MAX SIGNALS</label><input id="savedMax" type="number" min="1" max="20" value="5"><button class="volume" id="savedVolumeButton" onclick="startSavedScan()">SCAN SAVED VOLUME → SCAN 5</button></div>
+
+<div class="card"><div class="card-title">BURSA UNIVERSE SCANNER</div><label>MAX SIGNALS</label><input id="maxSignals" type="number" min="1" max="20" value="5"><button id="scanButton" onclick="startNormalScan()">SCAN 5</button><button class="secondary" onclick="testHistory()">TEST HISTORICAL SIGNAL</button></div>
+
+<div id="jobProgress" class="card"><div class="card-title">JOB STATUS</div><div id="jobText">Tiada job aktif.</div><div class="bar"><div id="jobFill" class="fill"></div></div><div id="jobSmall" class="small"></div><button id="resumeButton" class="secondary" style="display:none" onclick="resumeJob()">RESUME JOB</button></div>
+
+<div class="info"><b>Background Job:</b> browser tidak lagi menunggu request 10–12 minit. Server menjalankan kerja di background dan menyimpan progress selepas setiap kaunter.<br><br><b>Daily Volume:</b> hanya update manual. Scanner menggunakan snapshot tersimpan.<br><br><b>Recent Signals:</b> disimpan selama <b>5 hari</b>.</div>
+<pre id="out">Ready.</pre>
 </div>
-
-
-<!-- ======================================================
-     RECENT SIGNALS
-====================================================== -->
-
-<div class="card">
-
-<div class="card-title">
-RECENT SIGNALS
-</div>
-
-<div id="recentSignals">
-Loading...
-</div>
-
-<button
-class="secondary"
-onclick="loadRecentSignals()"
->
-REFRESH RECENT SIGNALS
-</button>
-
-<button
-class="danger"
-onclick="rescanSaved()"
->
-RESCAN SAVED
-</button>
-
-</div>
-
-
-<!-- ======================================================
-     DAILY VOLUME SNAPSHOT
-====================================================== -->
-
-<div class="card">
-
-<div class="card-title">
-DAILY VOLUME SNAPSHOT
-</div>
-
-<button
-class="volume"
-id="updateVolumeButton"
-onclick="updateDailyVolume()"
->
-UPDATE DAILY VOLUME
-</button>
-
-<div
-id="volumeStatus"
-class="info"
->
-Belum ada Daily Volume snapshot.
-</div>
-
-<div id="volumeList">
-</div>
-
-</div>
-
-
-<!-- ======================================================
-     SAVED VOLUME SCANNER
-====================================================== -->
-
-<div class="card">
-
-<div class="card-title">
-SCAN SAVED VOLUME
-</div>
-
-<button
-class="volume"
-id="savedVolumeButton"
-onclick="startSavedVolumeScan()"
->
-SCAN SAVED VOLUME → SCAN 5
-</button>
-
-</div>
-
-
-<!-- ======================================================
-     NORMAL SCANNER
-====================================================== -->
-
-<div class="card">
-
-<div class="card-title">
-BURSA UNIVERSE SCANNER
-</div>
-
-<label>
-MAX SIGNALS
-</label>
-
-<input
-id="maxSignals"
-type="number"
-min="1"
-max="20"
-value="5"
->
-
-<button
-id="scanButton"
-onclick="scanFirstBatch()"
->
-SCAN 5
-</button>
-
-<button
-id="nextButton"
-onclick="scanNextBatch()"
-disabled
->
-SCAN NEXT 5
-</button>
-
-<button
-class="secondary"
-onclick="testHistory()"
->
-TEST HISTORICAL SIGNAL
-</button>
-
-</div>
-
-
-<div class="info">
-
-<b>UPDATE DAILY VOLUME</b>
-akan membuat satu snapshot ranking untuk
-36 kaunter.
-
-<br><br>
-
-Selepas snapshot disimpan,
-<b>SCAN SAVED VOLUME</b>
-menggunakan ranking tersebut tanpa
-meminta volume sekali lagi daripada iTick.
-
-<br><br>
-
-<b>RECENT SIGNALS</b>
-akan disimpan selama
-<b>5 hari</b>.
-
-</div>
-
-
-<pre id="out">
-Ready.
-</pre>
-
-</div>
-
-
 <script>
-
-let nextStart = 0;
-let totalSignals = 0;
-let allSignals = [];
-let allErrors = [];
-let scanDone = false;
-
-let volumeOrder = [];
-
-
-function price(v){
-
-    if(
-        v === null ||
-        v === undefined
-    ){
-        return "-"
-    }
-
-    return Number(v).toFixed(3)
-}
-
-
-function fmtExpiry(v){
-
-    try{
-
-        return new Date(v).toLocaleString(
-            "ms-MY",
-            {
-                dateStyle:"medium",
-                timeStyle:"short"
-            }
-        )
-
-    }catch(e){
-
-        return v || "-"
-
-    }
-
-}
-
-
-/* ======================================================
-   RECENT SIGNALS
-====================================================== */
-
-async function loadRecentSignals(){
-
-    const box =
-        document.getElementById(
-            "recentSignals"
-        );
-
-    box.textContent =
-        "Loading...";
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/recent-signals"
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        if(
-            !d.signals.length
-        ){
-
-            box.innerHTML =
-                '<div class="empty">' +
-                'Tiada Recent Signal.' +
-                '</div>';
-
-            return;
-        }
-
-        box.innerHTML =
-            d.signals.map(
-                s =>
-                '<div class="signal">' +
-
-                '<div class="signal-title">' +
-                s.symbol +
-                ' | RM ' +
-                price(s.close) +
-                '</div>' +
-
-                '<div class="signal-detail">' +
-                s.date +
-                ' | ' +
-                s.signal_name +
-                '</div>' +
-
-                '<div class="signal-detail">' +
-                'Expired: ' +
-                fmtExpiry(
-                    s.expires_at
-                ) +
-                '</div>' +
-
-                '</div>'
-            ).join("");
-
-    }catch(e){
-
-        box.textContent =
-            "ERROR\n\n" + e;
-
-    }
-
-}
-
-
-/* ======================================================
-   VOLUME SNAPSHOT DISPLAY
-====================================================== */
-
-async function loadSavedVolume(){
-
-    const status =
-        document.getElementById(
-            "volumeStatus"
-        );
-
-    const list =
-        document.getElementById(
-            "volumeList"
-        );
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/volume-ranking"
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        if(
-            !d.ranking ||
-            !d.ranking.length
-        ){
-
-            status.textContent =
-                "Belum ada Daily Volume snapshot.";
-
-            list.innerHTML = "";
-
-            return;
-        }
-
-        volumeOrder =
-            d.ranking.map(
-                x => x.symbol
-            );
-
-        status.textContent =
-            "Snapshot: " +
-            d.updated_at +
-            " | " +
-            d.ranking.length +
-            " / 36 kaunter.";
-
-        list.innerHTML =
-            d.ranking
-            .slice(0,10)
-            .map(
-                x =>
-                '<div class="rank">' +
-
-                '#' +
-                x.rank +
-                ' ' +
-                x.symbol +
-                ' | Volume ' +
-                Number(
-                    x.volume
-                ).toLocaleString() +
-
-                '</div>'
-            )
-            .join("");
-
-    }catch(e){
-
-        status.textContent =
-            "Volume snapshot error: " + e;
-
-    }
-
-}
-
-
-/* ======================================================
-   UPDATE DAILY VOLUME
-====================================================== */
-
-async function updateDailyVolume(){
-
-    const button =
-        document.getElementById(
-            "updateVolumeButton"
-        );
-
-    const out =
-        document.getElementById(
-            "out"
-        );
-
-    button.disabled = true;
-
-    out.textContent =
-        "Meminta volume 36 kaunter.\n\n" +
-        "Proses mengambil masa beberapa minit.\n\n" +
-        "Sila tunggu sehingga selesai.\n";
-        
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/update-volume"
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        if(!d.ok){
-
-            out.textContent +=
-                "\nUPDATE GAGAL\n\n" +
-                JSON.stringify(
-                    d.errors,
-                    null,
-                    2
-                );
-
-            return;
-        }
-
-        volumeOrder =
-            d.ranking.map(
-                x => x.symbol
-            );
-
-        out.textContent +=
-            "\nUPDATE BERJAYA\n\n" +
-
-            "Snapshot time: " +
-            d.updated_at +
-            "\n" +
-
-            "Ranking: " +
-            d.count +
-            " / 36\n\n";
-
-        d.ranking
-            .slice(0,10)
-            .forEach(
-                x => {
-
-                    out.textContent +=
-                        "#" +
-                        x.rank +
-                        " " +
-                        x.symbol +
-                        " | Volume " +
-                        Number(
-                            x.volume
-                        ).toLocaleString() +
-                        "\n";
-
-                }
-            );
-
-        if(
-            d.errors &&
-            d.errors.length
-        ){
-
-            out.textContent +=
-                "\nVolume errors: " +
-                d.errors.length +
-                "\n";
-
-        }
-
-        await loadSavedVolume();
-
-    }catch(e){
-
-        out.textContent +=
-            "\nUPDATE ERROR\n\n" +
-            e;
-
-    }finally{
-
-        button.disabled = false;
-
-    }
-
-}
-
-
-/* ======================================================
-   SCAN CONTROL
-====================================================== */
-
-function resetScan(){
-
-    nextStart = 0;
-    totalSignals = 0;
-    allSignals = [];
-    allErrors = [];
-    scanDone = false;
-
-}
-
-
-/* ======================================================
-   SAVED VOLUME SCAN
-====================================================== */
-
-async function startSavedVolumeScan(){
-
-    resetScan();
-
-    const out =
-        document.getElementById(
-            "out"
-        );
-
-    const button =
-        document.getElementById(
-            "savedVolumeButton"
-        );
-
-    button.disabled = true;
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/volume-ranking"
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        if(
-            !d.ranking ||
-            !d.ranking.length
-        ){
-
-            out.textContent =
-                "TIADA SAVED VOLUME.\n\n" +
-                "Tekan UPDATE DAILY VOLUME " +
-                "dahulu.";
-
-            return;
-        }
-
-        volumeOrder =
-            d.ranking.map(
-                x => x.symbol
-            );
-
-        out.textContent =
-            "SCAN SAVED VOLUME\n\n" +
-
-            "Snapshot: " +
-            d.updated_at +
-            "\n\n" +
-
-            "Ranking tersedia: " +
-            volumeOrder.length +
-            " / 36\n\n";
-
-        await scanOneBatch(
-            true
-        );
-
-    }catch(e){
-
-        out.textContent =
-            "SAVED VOLUME SCAN ERROR\n\n" +
-            e;
-
-    }finally{
-
-        button.disabled = false;
-
-    }
-
-}
-
-
-/* ======================================================
-   NORMAL SCAN
-====================================================== */
-
-async function scanFirstBatch(){
-
-    resetScan();
-
-    document.getElementById(
-        "out"
-    ).textContent =
-        "MULA SCAN 5...\n\n";
-
-    await scanOneBatch(
-        false
-    );
-
-}
-
-
-async function scanNextBatch(){
-
-    const max =
-        parseInt(
-            document.getElementById(
-                "maxSignals"
-            ).value
-        ) || 5;
-
-    if(
-        scanDone ||
-        totalSignals >= max
-    ){
-        return;
-    }
-
-    await scanOneBatch(
-        false
-    );
-
-}
-
-
-/* ======================================================
-   SCAN ONE BATCH
-====================================================== */
-
-async function scanOneBatch(
-    savedVolume
-){
-
-    const out =
-        document.getElementById(
-            "out"
-        );
-
-    const scanButton =
-        document.getElementById(
-            "scanButton"
-        );
-
-    const nextButton =
-        document.getElementById(
-            "nextButton"
-        );
-
-    const savedButton =
-        document.getElementById(
-            "savedVolumeButton"
-        );
-
-    const max =
-        parseInt(
-            document.getElementById(
-                "maxSignals"
-            ).value
-        ) || 5;
-
-
-    scanButton.disabled = true;
-    nextButton.disabled = true;
-    savedButton.disabled = true;
-
-
-    let endpoint =
-        savedVolume
-        ? "/api/test/volume-scan"
-        : "/api/test/universe";
-
-
-    let query;
-
-
-    if(savedVolume){
-
-        query =
-            endpoint +
-            "?start=" +
-            nextStart +
-            "&batch_size=3&symbols=" +
-            encodeURIComponent(
-                volumeOrder.join(",")
-            );
-
-    }else{
-
-        query =
-            endpoint +
-            "?start=" +
-            nextStart +
-            "&batch_size=3";
-
-    }
-
-
-    out.textContent +=
-        "--------------------------------\n" +
-
-        (
-            savedVolume
-            ? "SAVED VOLUME SCAN BATCH\n"
-            : "UNIVERSE SCAN BATCH\n"
-        ) +
-
-        "Kaunter: " +
-        nextStart +
-        " → " +
-        (nextStart + 3) +
-        "\n\n";
-
-
-    try{
-
-        const r =
-            await fetch(
-                query
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        if(d.ok === false){
-
-            throw new Error(
-                d.error ||
-                "Scanner error"
-            );
-
-        }
-
-
-        if(
-            d.scanner &&
-            d.scanner.length
-        ){
-
-            for(
-                const s
-                of d.scanner
-            ){
-
-                if(
-                    totalSignals >= max
-                ){
-                    break;
-                }
-
-                totalSignals++;
-
-                allSignals.push(
-                    s
-                );
-
-                out.textContent +=
-                    "SIGNAL #" +
-                    totalSignals +
-                    "\n" +
-
-                    s.symbol +
-                    " | " +
-                    s.date +
-                    " | RM " +
-                    price(
-                        s.close
-                    ) +
-                    " | " +
-                    s.signal_name +
-                    "\n\n";
-
-            }
-
-        }else{
-
-            out.textContent +=
-                "Tiada signal baru " +
-                "dalam batch ini.\n\n";
-
-        }
-
-
-        if(
-            d.skipped &&
-            d.skipped.length
-        ){
-
-            out.textContent +=
-                "SKIP RECENT SIGNAL: " +
-                d.skipped.length +
-                "\n";
-
-            d.skipped.forEach(
-                x => {
-
-                    out.textContent +=
-                        x.symbol +
-                        " -> RECENT SIGNAL\n";
-
-                }
-            );
-
-            out.textContent += "\n";
-
-        }
-
-
-        if(
-            d.errors &&
-            d.errors.length
-        ){
-
-            d.errors.forEach(
-                x =>
-                    allErrors.push(x)
-            );
-
-            out.textContent +=
-                "Error batch: " +
-                d.errors.length +
-                "\n\n";
-
-        }
-
-
-        out.textContent +=
-            "--------------------------------\n" +
-
-            "Progress: " +
-            d.scanned_count +
-            " / " +
-            d.requested_count +
-            "\n" +
-
-            "Signal: " +
-            totalSignals +
-            " / " +
-            max +
-            "\n";
-
-
-        nextStart =
-            d.end;
-
-
-        if(
-            totalSignals >= max
-        ){
-
-            scanDone = true;
-
-            out.textContent +=
-                "\nMAX SIGNALS " +
-                max +
-                " DICAPAI.\n" +
-                "SCAN DIHENTIKAN.\n";
-
-        }
-
-        else if(
-            d.done
-        ){
-
-            scanDone = true;
-
-            out.textContent +=
-                "\nSEMUA SUSUNAN SELESAI.\n";
-
-        }
-
-        else{
-
-            out.textContent +=
-                "\nBATCH INI SELESAI.\n" +
-                "Teruskan scan seterusnya...\n";
-
-            await scanOneBatch(
-                savedVolume
-            );
-
-            return;
-
-        }
-
-
-        out.textContent +=
-            "\n================================\n" +
-            "SIGNAL DIJUMPAI SETAKAT INI\n" +
-            "================================\n";
-
-
-        if(
-            allSignals.length
-        ){
-
-            allSignals.forEach(
-                (s,i) => {
-
-                    out.textContent +=
-                        (i + 1) +
-                        ". " +
-                        s.symbol +
-                        " | " +
-                        s.date +
-                        " | RM " +
-                        price(
-                            s.close
-                        ) +
-                        " | " +
-                        s.signal_name +
-                        "\n";
-
-                }
-            );
-
-        }else{
-
-            out.textContent +=
-                "Tiada signal ditemui.\n";
-
-        }
-
-
-        if(
-            allErrors.length
-        ){
-
-            out.textContent +=
-                "\nERROR / 429:\n";
-
-            allErrors.forEach(
-                x => {
-
-                    out.textContent +=
-                        x.symbol +
-                        " -> " +
-                        x.error +
-                        "\n";
-
-                }
-            );
-
-        }
-
-
-        await loadRecentSignals();
-
-
-    }catch(e){
-
-        out.textContent +=
-            "\nSCAN ERROR\n\n" +
-            e;
-
-    }
-
-
-    scanButton.disabled = false;
-    savedButton.disabled = false;
-
-    nextButton.disabled =
-        scanDone ||
-        totalSignals >= max;
-
-}
-
-
-/* ======================================================
-   RESCAN SAVED
-====================================================== */
-
-async function rescanSaved(){
-
-    const out =
-        document.getElementById(
-            "out"
-        );
-
-    out.textContent =
-        "RESCAN SAVED...\n\n" +
-        "Sila tunggu...\n";
-
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/rescan-saved"
-            );
-
-        if(!r.ok){
-            throw new Error(
-                "HTTP " + r.status
-            );
-        }
-
-        const d =
-            await r.json();
-
-        out.textContent +=
-            "Jumlah saved sebelum rescan: " +
-            d.rescanned_count +
-            "\n\n";
-
-
-        d.results.forEach(
-            x => {
-
-                out.textContent +=
-                    x.symbol +
-                    " -> " +
-                    x.status +
-                    "\n";
-
-                if(x.signal){
-
-                    out.textContent +=
-                        "   " +
-                        x.signal.signal_name +
-                        " | RM " +
-                        price(
-                            x.signal.close
-                        ) +
-                        " | " +
-                        x.signal.date +
-                        "\n";
-
-                }
-
-            }
-        );
-
-
-        await loadRecentSignals();
-
-
-    }catch(e){
-
-        out.textContent =
-            "RESCAN SAVED ERROR\n\n" +
-            e;
-
-    }
-
-}
-
-
-/* ======================================================
-   HISTORY
-====================================================== */
-
-async function testHistory(){
-
-    const out =
-        document.getElementById(
-            "out"
-        );
-
-    out.textContent =
-        "Testing historical signals...";
-
-
-    try{
-
-        const r =
-            await fetch(
-                "/api/test/history"
-            );
-
-        out.textContent =
-            JSON.stringify(
-                await r.json(),
-                null,
-                2
-            );
-
-    }catch(e){
-
-        out.textContent =
-            "HISTORY ERROR\n\n" +
-            e;
-
-    }
-
-}
-
-
-/* ======================================================
-   PAGE LOAD
-====================================================== */
-
-loadRecentSignals();
-loadSavedVolume();
-
+let pollTimer=null;let currentJobId=null;let lastJobStatus=null;
+function price(v){return v===null||v===undefined?"-":Number(v).toFixed(3)}
+function fmtExpiry(v){try{return new Date(v).toLocaleString("ms-MY",{dateStyle:"medium",timeStyle:"short"})}catch(e){return v||"-"}}
+function jobLabel(t){return ({volume_update:"UPDATE DAILY VOLUME",saved_volume_scan:"SCAN SAVED VOLUME",universe_scan:"BURSA UNIVERSE SCAN",rescan_saved:"RESCAN SAVED"}[t]||t)}
+function setOut(s){document.getElementById("out").textContent=s}
+async function loadRecentSignals(){const box=document.getElementById("recentSignals");try{const r=await fetch("/api/recent-signals");const d=await r.json();if(!d.signals.length){box.innerHTML='<div class="small">Tiada Recent Signal.</div>';return}box.innerHTML=d.signals.map(s=>'<div class="signal"><div class="signal-title">'+s.symbol+' | RM '+price(s.close)+'</div><div class="signal-detail">'+s.date+' | '+s.signal_name+'</div><div class="signal-detail">Expired: '+fmtExpiry(s.expires_at)+'</div></div>').join("")}catch(e){box.textContent="ERROR: "+e}}
+async function loadSavedVolume(){const status=document.getElementById("volumeStatus"),list=document.getElementById("volumeList");try{const r=await fetch("/api/volume-ranking");const d=await r.json();if(!d.ranking||!d.ranking.length){status.textContent="Belum ada Daily Volume snapshot.";list.innerHTML="";return}status.textContent="Snapshot: "+d.updated_at+" | "+d.ranking.length+" / 36 kaunter.";list.innerHTML=d.ranking.slice(0,10).map(x=>'<div class="rank">#'+x.rank+' '+x.symbol+' | Volume '+Number(x.volume).toLocaleString()+"</div>").join("")}catch(e){status.textContent="Volume snapshot error: "+e}}
+function buttonsBusy(busy){["updateVolumeButton","savedVolumeButton","scanButton","rescanButton"].forEach(id=>document.getElementById(id).disabled=busy)}
+async function startVolumeUpdate(){try{const r=await fetch("/api/update-volume");const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("UPDATE DAILY VOLUME dimulakan.\n\nServer sedang bekerja di background.\nBrowser tidak perlu menunggu.");pollJob()}catch(e){setOut("UPDATE ERROR\n\n"+e)}}
+async function startSavedScan(){const max=Math.min(Math.max(parseInt(document.getElementById("savedMax").value)||5,1),20);try{const r=await fetch("/api/test/volume-scan/start?max_signals="+max);const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("SCAN SAVED VOLUME dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("SCAN ERROR\n\n"+e)}}
+async function startNormalScan(){const max=Math.min(Math.max(parseInt(document.getElementById("maxSignals").value)||5,1),20);try{const r=await fetch("/api/test/universe/start?max_signals="+max);const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("BURSA UNIVERSE SCAN dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("SCAN ERROR\n\n"+e)}}
+async function startRescan(){try{const r=await fetch("/api/rescan-saved/start");const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("RESCAN SAVED dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("RESCAN ERROR\n\n"+e)}}
+async function pollJob(){if(pollTimer)clearInterval(pollTimer);await refreshJob();pollTimer=setInterval(refreshJob,5000)}
+async function refreshJob(){try{const url=currentJobId?"/api/job-status?job_id="+encodeURIComponent(currentJobId):"/api/job-status";const r=await fetch(url);const d=await r.json();const job=d.job;if(!job){document.getElementById("jobText").textContent="Tiada job aktif.";document.getElementById("resumeButton").style.display="none";return}lastJobStatus=job;currentJobId=job.job_id;const total=Number(job.total||0),cur=Number(job.current_index||0),pct=total?Math.min(100,Math.round(cur/total*100)):0;document.getElementById("jobText").textContent=jobLabel(job.job_type)+" • "+job.status.toUpperCase();document.getElementById("jobFill").style.width=pct+"%";document.getElementById("jobSmall").textContent=(job.message||"")+" | Progress "+cur+" / "+total+" ("+pct+"%)";const resumable=(job.status==="interrupted"||job.status==="failed");document.getElementById("resumeButton").style.display=resumable?"block":"none";buttonsBusy(job.status==="running");if(job.status==="completed"||job.status==="failed"){renderJobResult(job);if(pollTimer){clearInterval(pollTimer);pollTimer=null}await loadRecentSignals();await loadSavedVolume();buttonsBusy(false)}}}catch(e){document.getElementById("jobSmall").textContent="Polling error: "+e}}
+function renderJobResult(job){const r=job.results||{};let out=jobLabel(job.job_type)+"\n\n"+(job.message||"")+"\n\n";if(r.ranking){out+="TOP VOLUME:\n"+r.ranking.slice(0,10).map(x=>"#"+x.rank+" "+x.symbol+" | "+Number(x.volume).toLocaleString()).join("\n")+"\n"}if(r.signals){out+="\nSIGNAL:\n"+(r.signals.length?r.signals.map((s,i)=>(i+1)+". "+s.symbol+" | "+s.date+" | RM "+price(s.close)+" | "+s.signal_name).join("\n"):"Tiada signal ditemui.")+"\n"}if(r.skipped&&r.skipped.length)out+="\nSKIP RECENT SIGNAL: "+r.skipped.length+"\n"+r.skipped.map(x=>x.symbol).join(", ")+"\n";if(r.errors&&r.errors.length)out+="\nERROR: "+r.errors.length+"\n"+r.errors.map(x=>x.symbol+" -> "+x.error).join("\n");if(r.rescan)out+="\nRESCAN:\n"+r.rescan.map(x=>x.symbol+" -> "+x.status).join("\n");setOut(out)}
+async function resumeJob(){if(!lastJobStatus)return;try{const r=await fetch("/api/job-resume?job_id="+encodeURIComponent(lastJobStatus.job_id));const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal resume");currentJobId=d.job_id;setOut("JOB DISAMBUNG.\n\nServer meneruskan dari checkpoint terakhir.");pollJob()}catch(e){setOut("RESUME ERROR\n\n"+e)}}
+async function testHistory(){setOut("Testing historical signals...\n\nSila tunggu.");try{const r=await fetch("/api/test/history");setOut(JSON.stringify(await r.json(),null,2))}catch(e){setOut("HISTORY ERROR\n\n"+e)}}
+async function init(){await loadRecentSignals();await loadSavedVolume();await refreshJob();if(lastJobStatus&&lastJobStatus.status==="running")pollJob()}
+init();
 </script>
-
-</body>
-
-</html>
-'''
+</body></html>'''
