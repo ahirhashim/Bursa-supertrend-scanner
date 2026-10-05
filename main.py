@@ -824,7 +824,7 @@ async function refreshJob(){try{const url=currentJobId?"/api/job-status?job_id="
 function renderJobResult(job){const r=job.results||{};let out=jobLabel(job.job_type)+"\n\n"+(job.message||"")+"\n\n";if(r.ranking){out+="TOP VOLUME:\n"+r.ranking.slice(0,10).map(x=>"#"+x.rank+" "+x.symbol+" | "+Number(x.volume).toLocaleString()).join("\n")+"\n"}if(r.signals){out+="\nSIGNAL:\n"+(r.signals.length?r.signals.map((s,i)=>(i+1)+". "+s.symbol+" | "+s.date+" | RM "+price(s.close)+" | "+s.signal_name).join("\n"):"Tiada signal ditemui.")+"\n"}if(r.skipped&&r.skipped.length)out+="\nSKIP RECENT SIGNAL: "+r.skipped.length+"\n"+r.skipped.map(x=>x.symbol).join(", ")+"\n";if(r.errors&&r.errors.length)out+="\nERROR: "+r.errors.length+"\n"+r.errors.map(x=>x.symbol+" -> "+x.error).join("\n");if(r.rescan)out+="\nRESCAN:\n"+r.rescan.map(x=>x.symbol+" -> "+x.status).join("\n");setOut(out)}
 async function resumeJob(){if(!lastJobStatus)return;try{const r=await fetch("/api/job-resume?job_id="+encodeURIComponent(lastJobStatus.job_id));const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal resume");currentJobId=d.job_id;setOut("JOB DISAMBUNG.\n\nServer meneruskan dari checkpoint terakhir.");pollJob()}catch(e){setOut("RESUME ERROR\n\n"+e)}}
 async function testHistory(){setOut("Testing historical signals...\n\nSila tunggu.");try{const r=await fetch("/api/test/history");setOut(JSON.stringify(await r.json(),null,2))}catch(e){setOut("HISTORY ERROR\n\n"+e)}}
-async function init(){await loadRecentSignals();await loadSavedVolume();await refreshJob();if(lastJobStatus&&lastJobStatus.status==="running")pollJob()}
+async function init(){loadRecentSignals();loadSavedVolume();refreshJob();}
 init();
 </script>
 </body></html>'''
