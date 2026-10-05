@@ -797,7 +797,7 @@ def fetch_daily_volume_batch(symbols):
     params = {
         "region": "MY",
         "exchange": "MYX",
-        "codes": ",".join(symbols)
+        "codes": ",".join(symbols),
         "kType": 8,
         "limit": 1
     }
