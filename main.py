@@ -867,48 +867,46 @@ def fetch_daily_volume_batch(symbols):
     payload = data.get("data", {})
 
     if not isinstance(payload, dict):
-        return {
-            "ok": False,
-            "error": (
-                "Format data quote tidak dijangka."
-            ),
-            "results": []
-        }
+    return {
+        "ok": False,
+        "error": "Format data K-Line tidak dijangka.",
+        "results": []
+    }
 
     results = []
 
     for symbol in symbols:
 
-        quote = payload.get(symbol)
+    candles = payload.get(symbol, [])
 
-        if not quote:
-            results.append({
-                "symbol": symbol,
-                "ok": False,
-                "error": (
-                    "Tiada quote dalam batch."
-                )
-            })
-
-            continue
-
-        try:
-            volume = float(
-                quote.get("v", 0) or 0
-            )
-
-        except Exception:
-            volume = 0.0
-
+    if not candles:
         results.append({
             "symbol": symbol,
-            "ok": True,
-            "volume": volume
+            "ok": False,
+            "error": "Tiada daily candle dalam batch."
         })
+        continue
+
+    try:
+        latest = max(
+            candles,
+            key=lambda x: float(x.get("t", 0) or 0)
+        )
+
+        volume = float(latest.get("v", 0) or 0)
+
+    except Exception:
+        volume = 0.0
+
+    results.append({
+        "symbol": symbol,
+        "ok": True,
+        "volume": volume
+    })
 
     return {
-        "ok": True,
-        "results": results
+    "ok": True,
+    "results": results
     }
 
 
