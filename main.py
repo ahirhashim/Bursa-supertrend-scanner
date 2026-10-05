@@ -778,7 +778,7 @@ def calculate_symbol(symbol):
 
 
 # ============================================================
-# BATCH DAILY VOLUME
+# DAILY VOLUME
 # ============================================================
 def fetch_daily_volume_batch(symbols):
 
@@ -789,126 +789,82 @@ def fetch_daily_volume_batch(symbols):
             "results": []
         }
 
-    headers = {
-        "accept": "application/json",
-        "token": ITICK_API_KEY
-    }
-
-    params = {
-        "region": "MY",
-        "exchange": "MYX",
-        "codes": ",".join(symbols),
-        "kType": 8,
-        "limit": 1
-    }
-
-    wait_before_itick_request()
-
-    try:
-        response = requests.get(
-            ITICK_BATCH_KLINE_URL,
-            headers=headers,
-            params=params,
-            timeout=30
-        )
-
-    except requests.RequestException as error:
-        return {
-            "ok": False,
-            "error": str(error),
-            "results": []
-        }
-
-    print(
-        "QUOTE HTTP STATUS:",
-        response.status_code
-    )
-
-    print(
-        "QUOTE RAW RESPONSE:",
-        response.text[:1000]
-    )
-
-    if response.status_code == 429:
-        return {
-            "ok": False,
-            "error": (
-                "HTTP 429 - iTick rate limit."
-            ),
-            "results": []
-        }
-
-    if response.status_code != 200:
-        return {
-            "ok": False,
-            "error": (
-                f"HTTP {response.status_code}"
-            ),
-            "results": []
-        }
-
-    try:
-        data = response.json()
-
-    except ValueError:
-        return {
-            "ok": False,
-            "error": (
-                "Batch quote response bukan JSON."
-            ),
-            "results": []
-        }
-
-    if data.get("code") != 0:
-        return {
-            "ok": False,
-            "error": str(data),
-            "results": []
-        }
-
-    payload = data.get("data", {})
-
-    if not isinstance(payload, dict):
-        return {
-            "ok": False,
-            "error": "Format data K-Line tidak dijangka.",
-            "results": []
-        }
-
     results = []
+
+    # Gunakan endpoint single daily K-line
+    # kerana batch K-line memulangkan data kosong
+    # untuk kaunter Bursa pada endpoint free.
+    #
+    # fetch_kline() sudah menggunakan:
+    # - /stock/kline
+    # - kType = 8 (Daily)
+    # - pacing 20 saat antara request
 
     for symbol in symbols:
 
-        candles = payload.get(symbol, [])
+        print(
+            "VOLUME SINGLE KLINE:",
+            symbol
+        )
+
+        fetched = fetch_kline(
+            symbol,
+            limit=1
+        )
+
+        if not fetched.get("ok"):
+            results.append({
+                "symbol": symbol,
+                "ok": False,
+                "error": fetched.get(
+                    "error",
+                    "Gagal mendapatkan daily candle."
+                )
+            })
+            continue
+
+        candles = fetched.get(
+            "candles",
+            []
+        )
 
         if not candles:
             results.append({
                 "symbol": symbol,
                 "ok": False,
-                "error": "Tiada daily candle dalam batch."
+                "error": "Tiada daily candle."
+            })
+            continue
+
+        try:
+            latest = max(
+                candles,
+                key=lambda x: float(
+                    x.get("t", 0) or 0
+                )
+            )
+
+            volume = float(
+                latest.get("v", 0) or 0
+            )
+
+        except Exception as error:
+            results.append({
+                "symbol": symbol,
+                "ok": False,
+                "error": str(error)
+            })
+            continue
+
+        results.append({
+            "symbol": symbol,
+            "ok": True,
+            "volume": volume
         })
-        continue
-
-    try:
-        latest = max(
-            candles,
-            key=lambda x: float(x.get("t", 0) or 0)
-        )
-
-        volume = float(latest.get("v", 0) or 0)
-
-    except Exception:
-        volume = 0.0
-
-    results.append({
-        "symbol": symbol,
-        "ok": True,
-        "volume": volume
-    })
 
     return {
-    "ok": True,
-    "results": results
+        "ok": True,
+        "results": results
     }
 
 
