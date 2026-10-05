@@ -509,46 +509,99 @@ def run_volume_job(job_id):
         job = get_job(job_id)
         if not job:
             return
+
         results = job["results"]
         volume_results = results.get("volume_results", [])
         errors = results.get("errors", [])
+
         universe = BURSA_UNIVERSE
-        start = job["current_index"] 
+        start = job["current_index"]
         total = len(universe)
-        update_job(job_id, status="running", total=total, message="Mengambil Daily Volume...", results=results)
+
+        update_job(
+            job_id,
+            status="running",
+            total=total,
+            message="Mengambil Daily Volume...",
+            results=results
+        )
+
         while start < total:
             symbol = universe[start]
-    try:
-        result = fetch_daily_volume_batch([symbol])
-        item = result.get("results", [{}])[0] if 
-    result.get("results") else {"symbol": symbol, "ok": False, 
-    "error": result.get("error", "Unknown error")}
-    except Exception as error:
-        item = {"symbol": symbol, "ok": False, "error": f"Volume 
-    request exception: {error}"}
-            
+
+            try:
+                result = fetch_daily_volume_batch([symbol])
+
+                if result.get("results"):
+                    item = result["results"][0]
+                else:
+                    item = {
+                        "symbol": symbol,
+                        "ok": False,
+                        "error": result.get("error", "Unknown error")
+                    }
+
+            except Exception as error:
+                item = {
+                    "symbol": symbol,
+                    "ok": False,
+                    "error": f"Volume request exception: {error}"
+                }
+
             if item.get("ok"):
                 volume_results.append(item)
             else:
                 errors.append(item)
+
             start += 1
+
             results["volume_results"] = volume_results
             results["errors"] = errors
-            update_job(job_id, current_index=start, total=total,
-                       message=f"Volume {start}/{total}: {symbol}", results=results)
-        ranking = sorted(volume_results, key=lambda x: float(x.get("volume", 0)), reverse=True)
+
+            update_job(
+                job_id,
+                current_index=start,
+                total=total,
+                message=f"Volume {start}/{total}: {symbol}",
+                results=results
+            )
+
+        ranking = sorted(
+            volume_results,
+            key=lambda x: float(x.get("volume", 0)),
+            reverse=True
+        )
+
         for index, item in enumerate(ranking, start=1):
             item["rank"] = index
+
         updated_at = save_volume_snapshot(ranking) if ranking else None
+
         results["ranking"] = ranking
         results["updated_at"] = updated_at
-        update_job(job_id, status="completed" if ranking else "failed", current_index=total,
-                   message=f"Selesai: {len(ranking)}/{total} kaunter.", results=results, finished_at=iso_now())
+
+        update_job(
+            job_id,
+            status="completed" if ranking else "failed",
+            current_index=total,
+            message=f"Selesai: {len(ranking)}/{total} kaunter.",
+            results=results,
+            finished_at=iso_now()
+        )
+
     except Exception as error:
         print("VOLUME JOB ERROR:", repr(error), flush=True)
+
         job = get_job(job_id)
         results = job["results"] if job else _job_default_results()
-        update_job(job_id, status="failed", message=f"Volume job error: {error}", results=results, finished_at=iso_now())
+
+        update_job(
+            job_id,
+            status="failed",
+            message=f"Volume job error: {error}",
+            results=results,
+            finished_at=iso_now()
+        )
 
 # ============================================================
 # BACKGROUND SCAN JOBS
