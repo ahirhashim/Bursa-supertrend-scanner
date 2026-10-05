@@ -876,7 +876,7 @@ def build_volume_ranking():
     all_results = []
     errors = []
 
-    volume_universe = BURSA_UNIVERSE[:20]
+    volume_universe = BURSA_UNIVERSE
     total = len(volume_universe)
     
 
