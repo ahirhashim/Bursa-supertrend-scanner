@@ -23,9 +23,8 @@ ITICK_BATCH_QUOTE_URL = "https://api-free.itick.org/stock/quotes"
 
 # iTick Base = 5 calls/minute.
 # 20 saat antara request memberi ruang yang lebih selamat.
-ITICK_REQUEST_DELAY = float(
-    os.getenv("ITICK_REQUEST_DELAY", "20.0")
-)
+# PAKSA 20 SAAT ANTARA SETIAP REQUEST ITICK.
+ITICK_REQUEST_DELAY = 20.0
 
 ITICK_MAX_RETRIES = 0
 
