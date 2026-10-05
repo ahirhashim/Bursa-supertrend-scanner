@@ -798,13 +798,15 @@ def fetch_daily_volume_batch(symbols):
         "region": "MY",
         "exchange": "MYX",
         "codes": ",".join(symbols)
+        "kType": 8,
+        "limit": 1
     }
 
     wait_before_itick_request()
 
     try:
         response = requests.get(
-            ITICK_BATCH_QUOTE_URL,
+            ITICK_BATCH_KLINE_URL,
             headers=headers,
             params=params,
             timeout=30
