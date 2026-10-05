@@ -1903,10 +1903,10 @@ async function updateDailyVolume(){
     button.disabled = true;
 
     out.textContent =
-        "UPDATE DAILY VOLUME\n\n" +
-        "Meminta volume 36 kaunter " +
-        "dalam 4 batch...\n\n" +
-        "Sila tunggu.\n";
+        "Meminta volume 36 kaunter.\n\n" +
+        "Proses mengambil masa beberapa minit.\n\n" +
+        "Sila tunggu sehingga selesai.\n";
+        
 
     try{
 
@@ -2199,7 +2199,7 @@ async function scanOneBatch(
             endpoint +
             "?start=" +
             nextStart +
-            "&batch_size=5&symbols=" +
+            "&batch_size=3&symbols=" +
             encodeURIComponent(
                 volumeOrder.join(",")
             );
@@ -2210,7 +2210,7 @@ async function scanOneBatch(
             endpoint +
             "?start=" +
             nextStart +
-            "&batch_size=5";
+            "&batch_size=3";
 
     }
 
@@ -2227,7 +2227,7 @@ async function scanOneBatch(
         "Kaunter: " +
         nextStart +
         " → " +
-        (nextStart + 5) +
+        (nextStart + 3) +
         "\n\n";
 
 
