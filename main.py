@@ -20,6 +20,8 @@ ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
 ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
 ITICK_REQUEST_DELAY = 20.0
 ITICK_MAX_RETRIES = 0
+ITICK_CONNECT_TIMEOUT = 5
+ITICK_READ_TIMEOUT = 15
 
 # ============================================================
 # SUPERTREND - LOCKED
@@ -435,7 +437,7 @@ def fetch_kline(symbol, limit=50):
     params = {"region": "MY", "exchange": "MYX", "code": symbol, "kType": 8, "limit": limit}
     wait_before_itick_request()
     try:
-        response = requests.get(ITICK_KLINE_URL, params=params, headers=headers, timeout=30)
+        response = requests.get(ITICK_KLINE_URL, params=params, headers=headers, timeout=(ITICK_CONNECT_TIMEOUT, ITICK_READ_TIMEOUT))
     except requests.RequestException as error:
         return {"ok": False, "symbol": symbol, "error": f"K-line request error: {error}"}
     if response.status_code == 429:
@@ -511,13 +513,20 @@ def run_volume_job(job_id):
         volume_results = results.get("volume_results", [])
         errors = results.get("errors", [])
         universe = BURSA_UNIVERSE
-        start = job["current_index"]
+        start = job["current_index"] 
         total = len(universe)
         update_job(job_id, status="running", total=total, message="Mengambil Daily Volume...", results=results)
         while start < total:
             symbol = universe[start]
-            result = fetch_daily_volume_batch([symbol])
-            item = result.get("results", [{}])[0] if result.get("results") else {"symbol": symbol, "ok": False, "error": result.get("error", "Unknown error")}
+    try:
+        result = fetch_daily_volume_batch([symbol])
+        item = result.get("results", [{}])[0] if 
+    result.get("results") else {"symbol": symbol, "ok": False, 
+    "error": result.get("error", "Unknown error")}
+    except Exception as error:
+        item = {"symbol": symbol, "ok": False, "error": f"Volume 
+    request exception: {error}"}
+            
             if item.get("ok"):
                 volume_results.append(item)
             else:
