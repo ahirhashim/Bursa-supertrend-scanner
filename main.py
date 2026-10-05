@@ -867,23 +867,23 @@ def fetch_daily_volume_batch(symbols):
     payload = data.get("data", {})
 
     if not isinstance(payload, dict):
-    return {
-        "ok": False,
-        "error": "Format data K-Line tidak dijangka.",
-        "results": []
-    }
+        return {
+            "ok": False,
+            "error": "Format data K-Line tidak dijangka.",
+            "results": []
+        }
 
     results = []
 
     for symbol in symbols:
 
-    candles = payload.get(symbol, [])
+        candles = payload.get(symbol, [])
 
-    if not candles:
-        results.append({
-            "symbol": symbol,
-            "ok": False,
-            "error": "Tiada daily candle dalam batch."
+        if not candles:
+            results.append({
+                "symbol": symbol,
+                "ok": False,
+                "error": "Tiada daily candle dalam batch."
         })
         continue
 
