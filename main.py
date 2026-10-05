@@ -19,7 +19,7 @@ app = FastAPI(title="Bursa Supertrend Scanner")
 # ============================================================
 ITICK_API_KEY = os.getenv("ITICK_API_KEY", "")
 ITICK_KLINE_URL = "https://api-free.itick.org/stock/kline"
-ITICK_BATCH_QUOTE_URL = "https://api-free.itick.org/stock/quotes"
+ITICK_BATCH_KLINE_URL = "https://api-free.itick.org/stock/klines"
 
 # iTick Base = 5 calls/minute.
 # 20 saat antara request memberi ruang yang lebih selamat.
