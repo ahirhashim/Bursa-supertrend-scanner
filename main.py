@@ -920,7 +920,9 @@ def build_volume_ranking():
     all_results = []
     errors = []
 
-    total = len(BURSA_UNIVERSE)
+    volume_universe = BURSA_UNIVERSE[:20]
+    total = len(volume_universe)
+    
 
     for start in range(
         0,
@@ -928,10 +930,10 @@ def build_volume_ranking():
         VOLUME_BATCH_SIZE
     ):
 
-        batch = BURSA_UNIVERSE[
-            start:start + VOLUME_BATCH_SIZE
+        batch = volume_universe[
+            start:start + VOLUME_BATCH_SIZE 
         ]
-
+        
         print(
             "VOLUME BATCH:",
             start,
