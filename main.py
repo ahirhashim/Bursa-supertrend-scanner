@@ -892,7 +892,6 @@ body{margin:0;padding:20px;background:#101010;color:#eee;font-family:Arial,sans-
 <pre id="out">Ready.</pre>
 </div>
 <script>
-<script>
 let pollTimer = null;
 let currentJobId = null;
 let lastJobStatus = null;
