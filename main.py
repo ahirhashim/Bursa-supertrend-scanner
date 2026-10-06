@@ -892,24 +892,563 @@ body{margin:0;padding:20px;background:#101010;color:#eee;font-family:Arial,sans-
 <pre id="out">Ready.</pre>
 </div>
 <script>
-let pollTimer=null;let currentJobId=null;let lastJobStatus=null;
-function price(v){return v===null||v===undefined?"-":Number(v).toFixed(3)}
-function fmtExpiry(v){try{return new Date(v).toLocaleString("ms-MY",{dateStyle:"medium",timeStyle:"short"})}catch(e){return v||"-"}}
-function jobLabel(t){return ({volume_update:"UPDATE DAILY VOLUME",saved_volume_scan:"SCAN SAVED VOLUME",universe_scan:"BURSA UNIVERSE SCAN",rescan_saved:"RESCAN SAVED"}[t]||t)}
-function setOut(s){document.getElementById("out").textContent=s}
-async function loadRecentSignals(){const box=document.getElementById("recentSignals");try{const r=await fetch("/api/recent-signals");const d=await r.json();if(!d.signals.length){box.innerHTML='<div class="small">Tiada Recent Signal.</div>';return}box.innerHTML=d.signals.map(s=>'<div class="signal"><div class="signal-title">'+s.symbol+' | RM '+price(s.close)+'</div><div class="signal-detail">'+s.date+' | '+s.signal_name+'</div><div class="signal-detail">Expired: '+fmtExpiry(s.expires_at)+'</div></div>').join("")}catch(e){box.textContent="ERROR: "+e}}
-async function loadSavedVolume(){const status=document.getElementById("volumeStatus"),list=document.getElementById("volumeList");try{const r=await fetch("/api/volume-ranking?t="+Date.now());const d=await r.json();if(!d.ranking||!d.ranking.length){status.textContent="Belum ada Daily Volume snapshot.";list.innerHTML="";return}status.textContent="Snapshot: "+d.updated_at+" | "+d.ranking.length+" / 36 kaunter.";list.innerHTML=d.ranking.slice(0,10).map(x=>'<div class="rank">#'+x.rank+' '+x.symbol+' | Volume '+Number(x.volume).toLocaleString()+"</div>").join("")}catch(e){status.textContent="Volume snapshot error: "+e}}
-function buttonsBusy(busy){["updateVolumeButton","savedVolumeButton","scanButton","rescanButton"].forEach(id=>document.getElementById(id).disabled=busy)}
-async function startVolumeUpdate(){try{const r=await fetch("/api/update-volume");const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("UPDATE DAILY VOLUME dimulakan.\n\nServer sedang bekerja di background.\nBrowser tidak perlu menunggu.");pollJob()}catch(e){setOut("UPDATE ERROR\n\n"+e)}}
-async function startSavedScan(){const max=Math.min(Math.max(parseInt(document.getElementById("savedMax").value)||5,1),20);try{const r=await fetch("/api/test/volume-scan/start?max_signals="+max);const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("SCAN SAVED VOLUME dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("SCAN ERROR\n\n"+e)}}
-async function startNormalScan(){const max=Math.min(Math.max(parseInt(document.getElementById("maxSignals").value)||5,1),20);try{const r=await fetch("/api/test/universe/start?max_signals="+max);const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("BURSA UNIVERSE SCAN dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("SCAN ERROR\n\n"+e)}}
-async function startRescan(){try{const r=await fetch("/api/rescan-saved/start");const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal");currentJobId=d.job_id;setOut("RESCAN SAVED dimulakan.\n\nServer sedang bekerja di background.");pollJob()}catch(e){setOut("RESCAN ERROR\n\n"+e)}}
-async function pollJob(){if(pollTimer)clearInterval(pollTimer);await refreshJob();pollTimer=setInterval(refreshJob,5000)}
-async function refreshJob(){try{const url=currentJobId?"/api/job-status?job_id="+encodeURIComponent(currentJobId):"/api/job-status";const r=await fetch(url);const d=await r.json();const job=d.job;if(!job){document.getElementById("jobText").textContent="Tiada job aktif.";document.getElementById("resumeButton").style.display="none";return}lastJobStatus=job;currentJobId=job.job_id;const total=Number(job.total||0),cur=Number(job.current_index||0),pct=total?Math.min(100,Math.round(cur/total*100)):0;document.getElementById("jobText").textContent=jobLabel(job.job_type)+" • "+job.status.toUpperCase();document.getElementById("jobFill").style.width=pct+"%";document.getElementById("jobSmall").textContent=(job.message||"")+" | Progress "+cur+" / "+total+" ("+pct+"%)";const resumable=(job.status==="interrupted"||job.status==="failed");document.getElementById("resumeButton").style.display=resumable?"block":"none";buttonsBusy(job.status==="running");if(job.status==="completed"||job.status==="failed"){renderJobResult(job);if(pollTimer){clearInterval(pollTimer);pollTimer=null}await loadRecentSignals();await loadSavedVolume();buttonsBusy(false)}}}catch(e){document.getElementById("jobSmall").textContent="Polling error: "+e}}
-function renderJobResult(job){const r=job.results||{};let out=jobLabel(job.job_type)+"\n\n"+(job.message||"")+"\n\n";if(r.ranking){out+="TOP VOLUME:\n"+r.ranking.slice(0,10).map(x=>"#"+x.rank+" "+x.symbol+" | "+Number(x.volume).toLocaleString()).join("\n")+"\n"}if(r.signals){out+="\nSIGNAL:\n"+(r.signals.length?r.signals.map((s,i)=>(i+1)+". "+s.symbol+" | "+s.date+" | RM "+price(s.close)+" | "+s.signal_name).join("\n"):"Tiada signal ditemui.")+"\n"}if(r.skipped&&r.skipped.length)out+="\nSKIP RECENT SIGNAL: "+r.skipped.length+"\n"+r.skipped.map(x=>x.symbol).join(", ")+"\n";if(r.errors&&r.errors.length)out+="\nERROR: "+r.errors.length+"\n"+r.errors.map(x=>x.symbol+" -> "+x.error).join("\n");if(r.rescan)out+="\nRESCAN:\n"+r.rescan.map(x=>x.symbol+" -> "+x.status).join("\n");setOut(out)}
-async function resumeJob(){if(!lastJobStatus)return;try{const r=await fetch("/api/job-resume?job_id="+encodeURIComponent(lastJobStatus.job_id));const d=await r.json();if(!d.ok)throw new Error(d.error||"Gagal resume");currentJobId=d.job_id;setOut("JOB DISAMBUNG.\n\nServer meneruskan dari checkpoint terakhir.");pollJob()}catch(e){setOut("RESUME ERROR\n\n"+e)}}
-async function testHistory(){setOut("Testing historical signals...\n\nSila tunggu.");try{const r=await fetch("/api/test/history");setOut(JSON.stringify(await r.json(),null,2))}catch(e){setOut("HISTORY ERROR\n\n"+e)}}
-async function init(){loadRecentSignals();loadSavedVolume();refreshJob();}
-init();
+<script>
+let pollTimer = null;
+let currentJobId = null;
+let lastJobStatus = null;
+
+function price(v) {
+    if (v === null || v === undefined) return "-";
+    return Number(v).toFixed(3);
+}
+
+function setOut(text) {
+    const el = document.getElementById("out");
+    if (el) el.textContent = text;
+}
+
+function jobLabel(type) {
+    const labels = {
+        volume_update: "UPDATE DAILY VOLUME",
+        saved_volume_scan: "SCAN SAVED VOLUME",
+        universe_scan: "BURSA UNIVERSE SCAN",
+        rescan_saved: "RESCAN SAVED"
+    };
+    return labels[type] || type;
+}
+
+/* =========================
+   RECENT SIGNALS
+   ========================= */
+async function loadRecentSignals() {
+    const box = document.getElementById("recentSignals");
+
+    try {
+        const response = await fetch(
+            "/api/recent-signals?t=" + Date.now()
+        );
+
+        const data = await response.json();
+
+        if (!data.signals || data.signals.length === 0) {
+            box.innerHTML =
+                '<div class="small">Tiada Recent Signal.</div>';
+            return;
+        }
+
+        box.innerHTML = data.signals.map(function(s) {
+            return (
+                '<div class="signal">' +
+                '<div class="signal-title">' +
+                s.symbol + " | RM " + price(s.close) +
+                "</div>" +
+                '<div class="signal-detail">' +
+                s.date + " | " + s.signal_name +
+                "</div>" +
+                '<div class="signal-detail">Expired: ' +
+                s.expires_at +
+                "</div>" +
+                "</div>"
+            );
+        }).join("");
+
+    } catch (error) {
+        box.textContent = "ERROR: " + error;
+    }
+}
+
+/* =========================
+   DAILY VOLUME
+   ========================= */
+async function loadSavedVolume() {
+    const status = document.getElementById("volumeStatus");
+    const list = document.getElementById("volumeList");
+
+    try {
+        const response = await fetch(
+            "/api/volume-ranking?t=" + Date.now()
+        );
+
+        const data = await response.json();
+
+        if (!data.ranking || data.ranking.length === 0) {
+            status.textContent =
+                "Belum ada Daily Volume snapshot.";
+            list.innerHTML = "";
+            return;
+        }
+
+        status.textContent =
+            "Snapshot: " +
+            data.updated_at +
+            " | " +
+            data.ranking.length +
+            " / 36 kaunter.";
+
+        list.innerHTML = data.ranking
+            .slice(0, 10)
+            .map(function(x) {
+                return (
+                    '<div class="rank">' +
+                    "#" + x.rank +
+                    " " + x.symbol +
+                    " | Volume " +
+                    Number(x.volume).toLocaleString() +
+                    "</div>"
+                );
+            })
+            .join("");
+
+    } catch (error) {
+        status.textContent =
+            "Volume snapshot error: " + error;
+    }
+}
+
+/* =========================
+   BUTTON STATUS
+   ========================= */
+function buttonsBusy(busy) {
+    const ids = [
+        "updateVolumeButton",
+        "savedVolumeButton",
+        "scanButton",
+        "rescanButton"
+    ];
+
+    ids.forEach(function(id) {
+        const button = document.getElementById(id);
+        if (button) {
+            button.disabled = busy;
+        }
+    });
+}
+
+/* =========================
+   UPDATE DAILY VOLUME
+   ========================= */
+async function startVolumeUpdate() {
+    try {
+        const response = await fetch(
+            "/api/update-volume?t=" + Date.now()
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || "Gagal");
+        }
+
+        currentJobId = data.job_id;
+
+        setOut(
+            "UPDATE DAILY VOLUME dimulakan.\n\n" +
+            "Server sedang bekerja di background.\n" +
+            "Browser tidak perlu menunggu."
+        );
+
+        pollJob();
+
+    } catch (error) {
+        setOut("UPDATE ERROR\n\n" + error);
+    }
+}
+
+/* =========================
+   SAVED VOLUME SCAN
+   ========================= */
+async function startSavedScan() {
+    const input = document.getElementById("savedMax");
+    const max = Math.min(
+        Math.max(parseInt(input.value) || 5, 1),
+        20
+    );
+
+    try {
+        const response = await fetch(
+            "/api/test/volume-scan/start?max_signals=" + max
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || "Gagal");
+        }
+
+        currentJobId = data.job_id;
+
+        setOut(
+            "SCAN SAVED VOLUME dimulakan.\n\n" +
+            "Server sedang bekerja di background."
+        );
+
+        pollJob();
+
+    } catch (error) {
+        setOut("SCAN ERROR\n\n" + error);
+    }
+}
+
+/* =========================
+   BURSA UNIVERSE SCAN
+   ========================= */
+async function startNormalScan() {
+    const input = document.getElementById("maxSignals");
+    const max = Math.min(
+        Math.max(parseInt(input.value) || 5, 1),
+        20
+    );
+
+    try {
+        const response = await fetch(
+            "/api/test/universe/start?max_signals=" + max
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || "Gagal");
+        }
+
+        currentJobId = data.job_id;
+
+        setOut(
+            "BURSA UNIVERSE SCAN dimulakan.\n\n" +
+            "Server sedang bekerja di background."
+        );
+
+        pollJob();
+
+    } catch (error) {
+        setOut("SCAN ERROR\n\n" + error);
+    }
+}
+
+/* =========================
+   RESCAN SAVED
+   ========================= */
+async function startRescan() {
+    try {
+        const response = await fetch(
+            "/api/rescan-saved/start"
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || "Gagal");
+        }
+
+        currentJobId = data.job_id;
+
+        setOut(
+            "RESCAN SAVED dimulakan.\n\n" +
+            "Server sedang bekerja di background."
+        );
+
+        pollJob();
+
+    } catch (error) {
+        setOut("RESCAN ERROR\n\n" + error);
+    }
+}
+
+/* =========================
+   JOB STATUS
+   ========================= */
+async function pollJob() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+    }
+
+    await refreshJob();
+
+    pollTimer = setInterval(
+        refreshJob,
+        5000
+    );
+}
+
+async function refreshJob() {
+    try {
+        let url = "/api/job-status?t=" + Date.now();
+
+        if (currentJobId) {
+            url =
+                "/api/job-status?job_id=" +
+                encodeURIComponent(currentJobId) +
+                "&t=" + Date.now();
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const job = data.job;
+
+        if (!job) {
+            document.getElementById("jobText").textContent =
+                "Tiada job aktif.";
+
+            document.getElementById("resumeButton").style.display =
+                "none";
+
+            buttonsBusy(false);
+            return;
+        }
+
+        lastJobStatus = job;
+        currentJobId = job.job_id;
+
+        const total = Number(job.total || 0);
+        const current = Number(job.current_index || 0);
+
+        let percent = 0;
+
+        if (total > 0) {
+            percent = Math.min(
+                100,
+                Math.round(current / total * 100)
+            );
+        }
+
+        document.getElementById("jobText").textContent =
+            jobLabel(job.job_type) +
+            " • " +
+            String(job.status).toUpperCase();
+
+        document.getElementById("jobFill").style.width =
+            percent + "%";
+
+        document.getElementById("jobSmall").textContent =
+            (job.message || "") +
+            " | Progress " +
+            current +
+            " / " +
+            total +
+            " (" +
+            percent +
+            "%)";
+
+        const resumable =
+            job.status === "interrupted" ||
+            job.status === "failed";
+
+        document.getElementById("resumeButton").style.display =
+            resumable ? "block" : "none";
+
+        buttonsBusy(job.status === "running");
+
+        if (
+            job.status === "completed" ||
+            job.status === "failed"
+        ) {
+            renderJobResult(job);
+
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+
+            await loadRecentSignals();
+            await loadSavedVolume();
+
+            buttonsBusy(false);
+        }
+
+    } catch (error) {
+        const small =
+            document.getElementById("jobSmall");
+
+        if (small) {
+            small.textContent =
+                "Polling error: " + error;
+        }
+    }
+}
+
+/* =========================
+   JOB RESULT
+   ========================= */
+function renderJobResult(job) {
+    const result = job.results || {};
+
+    let output =
+        jobLabel(job.job_type) +
+        "\n\n" +
+        (job.message || "") +
+        "\n\n";
+
+    if (result.ranking) {
+        output +=
+            "TOP VOLUME:\n" +
+            result.ranking
+                .slice(0, 10)
+                .map(function(x) {
+                    return (
+                        "#" + x.rank +
+                        " " + x.symbol +
+                        " | " +
+                        Number(x.volume).toLocaleString()
+                    );
+                })
+                .join("\n") +
+            "\n";
+    }
+
+    if (result.signals) {
+        output +=
+            "\nSIGNAL:\n" +
+            (
+                result.signals.length
+                ? result.signals.map(function(s, i) {
+                    return (
+                        (i + 1) +
+                        ". " + s.symbol +
+                        " | " + s.date +
+                        " | RM " + price(s.close) +
+                        " | " + s.signal_name
+                    );
+                }).join("\n")
+                : "Tiada signal ditemui."
+            ) +
+            "\n";
+    }
+
+    if (
+        result.skipped &&
+        result.skipped.length
+    ) {
+        output +=
+            "\nSKIP RECENT SIGNAL: " +
+            result.skipped.length +
+            "\n" +
+            result.skipped
+                .map(function(x) {
+                    return x.symbol;
+                })
+                .join(", ") +
+            "\n";
+    }
+
+    if (
+        result.errors &&
+        result.errors.length
+    ) {
+        output +=
+            "\nERROR: " +
+            result.errors.length +
+            "\n" +
+            result.errors
+                .map(function(x) {
+                    return (
+                        x.symbol +
+                        " -> " +
+                        x.error
+                    );
+                })
+                .join("\n");
+    }
+
+    if (result.rescan) {
+        output +=
+            "\nRESCAN:\n" +
+            result.rescan
+                .map(function(x) {
+                    return (
+                        x.symbol +
+                        " -> " +
+                        x.status
+                    );
+                })
+                .join("\n");
+    }
+
+    setOut(output);
+}
+
+/* =========================
+   RESUME JOB
+   ========================= */
+async function resumeJob() {
+    if (!lastJobStatus) return;
+
+    try {
+        const response = await fetch(
+            "/api/job-resume?job_id=" +
+            encodeURIComponent(
+                lastJobStatus.job_id
+            )
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(
+                data.error || "Gagal resume"
+            );
+        }
+
+        currentJobId = data.job_id;
+
+        setOut(
+            "JOB DISAMBUNG.\n\n" +
+            "Server meneruskan dari checkpoint terakhir."
+        );
+
+        pollJob();
+
+    } catch (error) {
+        setOut(
+            "RESUME ERROR\n\n" +
+            error
+        );
+    }
+}
+
+/* =========================
+   HISTORY TEST
+   ========================= */
+async function testHistory() {
+    setOut(
+        "Testing historical signals...\n\n" +
+        "Sila tunggu."
+    );
+
+    try {
+        const response = await fetch(
+            "/api/test/history?t=" + Date.now()
+        );
+
+        const data = await response.json();
+
+        setOut(
+            JSON.stringify(
+                data,
+                null,
+                2
+            )
+        );
+
+    } catch (error) {
+        setOut(
+            "HISTORY ERROR\n\n" +
+            error
+        );
+    }
+}
+
+/* =========================
+   START
+   ========================= */
+async function init() {
+    await loadRecentSignals();
+    await loadSavedVolume();
+    await refreshJob();
+}
+
+window.addEventListener(
+    "DOMContentLoaded",
+    init
+);
 </script>
 </body></html>'''
