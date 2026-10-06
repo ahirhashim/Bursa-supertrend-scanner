@@ -226,17 +226,40 @@ def save_volume_snapshot(ranking):
 
 
 def get_volume_snapshot():
-    with _db_lock:
-        conn = get_db()
-        row = conn.execute("SELECT updated_at, ranking_json FROM volume_snapshot WHERE id=1").fetchone()
-        conn.close()
-    if not row:
-        return {"ok": False, "updated_at": None, "ranking": []}
+    snapshot_url = "https://raw.githubusercontent.com/ahirhashim/Bursa-supertrend-scanner/main/volume_snapshot.json"
+
     try:
-        ranking = json.loads(row["ranking_json"])
-    except Exception:
-        ranking = []
-    return {"ok": True, "updated_at": row["updated_at"], "ranking": ranking}
+        response = requests.get(snapshot_url, timeout=10)
+
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "updated_at": None,
+                "ranking": []
+            }
+
+        data = response.json()
+
+        ranking = data.get("ranking", [])
+        updated_at = data.get("updated_at")
+
+        if not isinstance(ranking, list):
+            ranking = []
+
+        return {
+            "ok": bool(ranking),
+            "updated_at": updated_at,
+            "ranking": ranking
+        }
+
+    except Exception as error:
+        print("VOLUME SNAPSHOT ERROR:", repr(error), flush=True)
+
+        return {
+            "ok": False,
+            "updated_at": None,
+            "ranking": []
+        }
 
 # ============================================================
 # JOB STORAGE
