@@ -1,222 +1,222 @@
 {
   "ok": true,
-  "updated_at": "2026-10-07 18:40:07",
+  "updated_at": "2026-10-08 18:41:35",
   "count": 36,
   "ranking": [
     {
-      "symbol": "TOPGLOV",
+      "symbol": "ZETRIX",
       "ok": true,
-      "volume": 6823605000.0,
+      "volume": 2575509200.0,
       "rank": 1
     },
     {
-      "symbol": "ZETRIX",
+      "symbol": "TOPGLOV",
       "ok": true,
-      "volume": 4189453700.0,
+      "volume": 199752800.0,
       "rank": 2
-    },
-    {
-      "symbol": "SUPERMX",
-      "ok": true,
-      "volume": 491760400.0,
-      "rank": 3
-    },
-    {
-      "symbol": "JCY",
-      "ok": true,
-      "volume": 209628100.0,
-      "rank": 4
-    },
-    {
-      "symbol": "HARTA",
-      "ok": true,
-      "volume": 200800900.0,
-      "rank": 5
-    },
-    {
-      "symbol": "KOSSAN",
-      "ok": true,
-      "volume": 114649400.0,
-      "rank": 6
     },
     {
       "symbol": "VS",
       "ok": true,
-      "volume": 103633300.0,
+      "volume": 169634500.0,
+      "rank": 3
+    },
+    {
+      "symbol": "SUPERMX",
+      "ok": true,
+      "volume": 78805900.0,
+      "rank": 4
+    },
+    {
+      "symbol": "JAKS",
+      "ok": true,
+      "volume": 66108200.0,
+      "rank": 5
+    },
+    {
+      "symbol": "DNEX",
+      "ok": true,
+      "volume": 51966700.0,
+      "rank": 6
+    },
+    {
+      "symbol": "YTLPOWR",
+      "ok": true,
+      "volume": 30800800.0,
       "rank": 7
     },
     {
       "symbol": "SNS",
       "ok": true,
-      "volume": 77811800.0,
+      "volume": 28779900.0,
       "rank": 8
     },
     {
-      "symbol": "JAKS",
+      "symbol": "JCY",
       "ok": true,
-      "volume": 54635400.0,
+      "volume": 26750900.0,
       "rank": 9
-    },
-    {
-      "symbol": "NOTION",
-      "ok": true,
-      "volume": 50098600.0,
-      "rank": 10
-    },
-    {
-      "symbol": "DNEX",
-      "ok": true,
-      "volume": 34714700.0,
-      "rank": 11
     },
     {
       "symbol": "INARI",
       "ok": true,
-      "volume": 28144800.0,
-      "rank": 12
-    },
-    {
-      "symbol": "VELESTO",
-      "ok": true,
-      "volume": 23463600.0,
-      "rank": 13
-    },
-    {
-      "symbol": "JHM",
-      "ok": true,
-      "volume": 16128400.0,
-      "rank": 14
-    },
-    {
-      "symbol": "YTLPOWR",
-      "ok": true,
-      "volume": 16074000.0,
-      "rank": 15
-    },
-    {
-      "symbol": "TANCO",
-      "ok": true,
-      "volume": 13275400.0,
-      "rank": 16
-    },
-    {
-      "symbol": "MRCB",
-      "ok": true,
-      "volume": 12187400.0,
-      "rank": 17
-    },
-    {
-      "symbol": "IJM",
-      "ok": true,
-      "volume": 9638400.0,
-      "rank": 18
-    },
-    {
-      "symbol": "GREATEC",
-      "ok": true,
-      "volume": 8900100.0,
-      "rank": 19
+      "volume": 22885700.0,
+      "rank": 10
     },
     {
       "symbol": "AXIATA",
       "ok": true,
-      "volume": 7421900.0,
-      "rank": 20
+      "volume": 20516500.0,
+      "rank": 11
     },
     {
-      "symbol": "WCT",
+      "symbol": "GREATEC",
       "ok": true,
-      "volume": 6163300.0,
-      "rank": 21
+      "volume": 17784500.0,
+      "rank": 12
+    },
+    {
+      "symbol": "AEMULUS",
+      "ok": true,
+      "volume": 16218300.0,
+      "rank": 13
     },
     {
       "symbol": "D&O",
       "ok": true,
-      "volume": 6049500.0,
+      "volume": 15552200.0,
+      "rank": 14
+    },
+    {
+      "symbol": "HARTA",
+      "ok": true,
+      "volume": 12958200.0,
+      "rank": 15
+    },
+    {
+      "symbol": "IJM",
+      "ok": true,
+      "volume": 9110100.0,
+      "rank": 16
+    },
+    {
+      "symbol": "TANCO",
+      "ok": true,
+      "volume": 9109600.0,
+      "rank": 17
+    },
+    {
+      "symbol": "KOSSAN",
+      "ok": true,
+      "volume": 8886000.0,
+      "rank": 18
+    },
+    {
+      "symbol": "WCT",
+      "ok": true,
+      "volume": 8866200.0,
+      "rank": 19
+    },
+    {
+      "symbol": "CAPITALA",
+      "ok": true,
+      "volume": 8358500.0,
+      "rank": 20
+    },
+    {
+      "symbol": "NOTION",
+      "ok": true,
+      "volume": 6627700.0,
+      "rank": 21
+    },
+    {
+      "symbol": "DIALOG",
+      "ok": true,
+      "volume": 6006300.0,
       "rank": 22
     },
     {
       "symbol": "FRONTKN",
       "ok": true,
-      "volume": 5622500.0,
+      "volume": 5050600.0,
       "rank": 23
-    },
-    {
-      "symbol": "CAPITALA",
-      "ok": true,
-      "volume": 5201000.0,
-      "rank": 24
-    },
-    {
-      "symbol": "AEMULUS",
-      "ok": true,
-      "volume": 4963300.0,
-      "rank": 25
-    },
-    {
-      "symbol": "ARMADA",
-      "ok": true,
-      "volume": 3469000.0,
-      "rank": 26
-    },
-    {
-      "symbol": "VSTECS",
-      "ok": true,
-      "volume": 3238300.0,
-      "rank": 27
-    },
-    {
-      "symbol": "DIALOG",
-      "ok": true,
-      "volume": 3093300.0,
-      "rank": 28
     },
     {
       "symbol": "MAHSING",
       "ok": true,
-      "volume": 3029800.0,
-      "rank": 29
+      "volume": 4421600.0,
+      "rank": 24
+    },
+    {
+      "symbol": "VELESTO",
+      "ok": true,
+      "volume": 4282700.0,
+      "rank": 25
     },
     {
       "symbol": "TM",
       "ok": true,
-      "volume": 2467700.0,
-      "rank": 30
+      "volume": 4062800.0,
+      "rank": 26
+    },
+    {
+      "symbol": "JHM",
+      "ok": true,
+      "volume": 3931400.0,
+      "rank": 27
     },
     {
       "symbol": "GENM",
       "ok": true,
-      "volume": 2377300.0,
-      "rank": 31
+      "volume": 2898800.0,
+      "rank": 28
+    },
+    {
+      "symbol": "VSTECS",
+      "ok": true,
+      "volume": 2569100.0,
+      "rank": 29
     },
     {
       "symbol": "DXN",
       "ok": true,
-      "volume": 1798500.0,
+      "volume": 2330300.0,
+      "rank": 30
+    },
+    {
+      "symbol": "ARMADA",
+      "ok": true,
+      "volume": 2269600.0,
+      "rank": 31
+    },
+    {
+      "symbol": "SRIDGE",
+      "ok": true,
+      "volume": 1823300.0,
       "rank": 32
     },
     {
-      "symbol": "MAXIS",
+      "symbol": "MRCB",
       "ok": true,
-      "volume": 1227000.0,
+      "volume": 1761200.0,
       "rank": 33
     },
     {
       "symbol": "BJCORP",
       "ok": true,
-      "volume": 969800.0,
+      "volume": 1089400.0,
       "rank": 34
     },
     {
-      "symbol": "SRIDGE",
+      "symbol": "MAXIS",
       "ok": true,
-      "volume": 621700.0,
+      "volume": 965800.0,
       "rank": 35
     },
     {
       "symbol": "MICROLN",
       "ok": true,
-      "volume": 13100.0,
+      "volume": 220600.0,
       "rank": 36
     }
   ],
