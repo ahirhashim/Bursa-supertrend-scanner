@@ -1,224 +1,188 @@
 {
-  "ok": true,
-  "updated_at": "2026-10-09 18:41:20",
-  "count": 36,
-  "ranking": [
-    {
-      "symbol": "ZETRIX",
-      "ok": true,
-      "volume": 1282676400.0,
-      "rank": 1
-    },
-    {
-      "symbol": "DNEX",
-      "ok": true,
-      "volume": 837483400.0,
-      "rank": 2
-    },
-    {
-      "symbol": "VS",
-      "ok": true,
-      "volume": 131471400.0,
-      "rank": 3
-    },
-    {
-      "symbol": "TOPGLOV",
-      "ok": true,
-      "volume": 101911500.0,
-      "rank": 4
-    },
-    {
-      "symbol": "JAKS",
-      "ok": true,
-      "volume": 51735000.0,
-      "rank": 5
-    },
-    {
-      "symbol": "INARI",
-      "ok": true,
-      "volume": 44417700.0,
-      "rank": 6
-    },
-    {
-      "symbol": "JCY",
-      "ok": true,
-      "volume": 26485900.0,
-      "rank": 7
-    },
-    {
-      "symbol": "IJM",
-      "ok": true,
-      "volume": 17936700.0,
-      "rank": 8
-    },
-    {
-      "symbol": "YTLPOWR",
-      "ok": true,
-      "volume": 17240400.0,
-      "rank": 9
-    },
-    {
-      "symbol": "WCT",
-      "ok": true,
-      "volume": 13775100.0,
-      "rank": 10
-    },
-    {
-      "symbol": "CAPITALA",
-      "ok": true,
-      "volume": 12893100.0,
-      "rank": 11
-    },
-    {
-      "symbol": "SUPERMX",
-      "ok": true,
-      "volume": 12806900.0,
-      "rank": 12
-    },
-    {
-      "symbol": "KOSSAN",
-      "ok": true,
-      "volume": 12485400.0,
-      "rank": 13
-    },
-    {
-      "symbol": "TANCO",
-      "ok": true,
-      "volume": 10425300.0,
-      "rank": 14
-    },
-    {
-      "symbol": "MRCB",
-      "ok": true,
-      "volume": 10021000.0,
-      "rank": 15
-    },
-    {
-      "symbol": "AEMULUS",
-      "ok": true,
-      "volume": 8922000.0,
-      "rank": 16
-    },
-    {
-      "symbol": "MAHSING",
-      "ok": true,
-      "volume": 8537200.0,
-      "rank": 17
-    },
-    {
-      "symbol": "AXIATA",
-      "ok": true,
-      "volume": 8039800.0,
-      "rank": 18
-    },
-    {
-      "symbol": "ARMADA",
-      "ok": true,
-      "volume": 7962300.0,
-      "rank": 19
-    },
+  "ok": false,
+  "updated_at": "2026-10-12 18:42:18",
+  "count": 0,
+  "ranking": [],
+  "errors": [
     {
       "symbol": "D&O",
-      "ok": true,
-      "volume": 7750000.0,
-      "rank": 20
-    },
-    {
-      "symbol": "SNS",
-      "ok": true,
-      "volume": 6766000.0,
-      "rank": 21
-    },
-    {
-      "symbol": "GREATEC",
-      "ok": true,
-      "volume": 6233300.0,
-      "rank": 22
-    },
-    {
-      "symbol": "NOTION",
-      "ok": true,
-      "volume": 6148600.0,
-      "rank": 23
-    },
-    {
-      "symbol": "HARTA",
-      "ok": true,
-      "volume": 4695900.0,
-      "rank": 24
-    },
-    {
-      "symbol": "TM",
-      "ok": true,
-      "volume": 4537500.0,
-      "rank": 25
-    },
-    {
-      "symbol": "JHM",
-      "ok": true,
-      "volume": 3065900.0,
-      "rank": 26
-    },
-    {
-      "symbol": "MICROLN",
-      "ok": true,
-      "volume": 2769400.0,
-      "rank": 27
-    },
-    {
-      "symbol": "DIALOG",
-      "ok": true,
-      "volume": 2540000.0,
-      "rank": 28
-    },
-    {
-      "symbol": "DXN",
-      "ok": true,
-      "volume": 2515600.0,
-      "rank": 29
-    },
-    {
-      "symbol": "FRONTKN",
-      "ok": true,
-      "volume": 1886700.0,
-      "rank": 30
-    },
-    {
-      "symbol": "VSTECS",
-      "ok": true,
-      "volume": 1758500.0,
-      "rank": 31
-    },
-    {
-      "symbol": "MAXIS",
-      "ok": true,
-      "volume": 1757500.0,
-      "rank": 32
-    },
-    {
-      "symbol": "VELESTO",
-      "ok": true,
-      "volume": 1371900.0,
-      "rank": 33
-    },
-    {
-      "symbol": "GENM",
-      "ok": true,
-      "volume": 1282200.0,
-      "rank": 34
-    },
-    {
-      "symbol": "BJCORP",
-      "ok": true,
-      "volume": 840000.0,
-      "rank": 35
+      "ok": false,
+      "error": "HTTP 401"
     },
     {
       "symbol": "SRIDGE",
-      "ok": true,
-      "volume": 405900.0,
-      "rank": 36
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "DNEX",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "ZETRIX",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "INARI",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "FRONTKN",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "JCY",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "GREATEC",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "NOTION",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "SNS",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "VSTECS",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "AEMULUS",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "MICROLN",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "JHM",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "TOPGLOV",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "SUPERMX",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "HARTA",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "KOSSAN",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "DXN",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "ARMADA",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "VELESTO",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "CAPITALA",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "MRCB",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "BJCORP",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "TANCO",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "JAKS",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "WCT",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "IJM",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "MAHSING",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "TM",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "AXIATA",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "MAXIS",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "DIALOG",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "GENM",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "YTLPOWR",
+      "ok": false,
+      "error": "HTTP 401"
+    },
+    {
+      "symbol": "VS",
+      "ok": false,
+      "error": "HTTP 401"
     }
-  ],
-  "errors": []
+  ]
 }
